@@ -4,6 +4,7 @@ sentinel for explorer
 Cron sentinel / @bitsignal
 To be run every minute.
 Updated for Python3.7 by default
+add to crontab: '* * * * * cd /path/to/explorer/directory/html;python3.7 sentinel.py'
 """
 import subprocess
 
