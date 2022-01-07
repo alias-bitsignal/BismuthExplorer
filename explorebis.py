@@ -1204,6 +1204,14 @@ def tokenquery():
 	tview = []
 		
 	for t in query_list:
+
+		token_address_from = t[3] #short token address from / 2022-01-07
+		token_address_from_d = "{}....{}".format(token_address_from[:5],token_address_from[-5:]) #short token address from / 2022-01-07 
+		token_address_to = t[4] #short token address to / 2022-01-07
+		token_address_to_d = "{}....{}".format(token_address_to[:5],token_address_to[-5:]) #short token address to / 2022-01-07 
+
+		token_txid = t[5] #short token txid 2022-01-07
+		token_txid_d = "{}....{}".format(token_txid[:5],token_txid[-5:]) #short token txid 2022-01-07
 	
 		tview.append('<tr>')
 
@@ -1212,10 +1220,13 @@ def tokenquery():
 		if str(t[3]) == "issued":
 			tview.append("<td>{}</td>".format(str(t[3])))
 		else:
-			tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(t[3]),str(t[3])))
-		tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(t[4]),str(t[4])))
+			#tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(t[3]),str(t[3])))
+			tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(token_address_from),str(token_address_from_d))) #short token address from / 2022-01-07 
+		#tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(t[4]),str(t[4])))
+		tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(token_address_to),str(token_address_to_d))) #short token address to / 2022-01-07
 		tview.append('<td>{}</td>'.format(str(t[6])))
-		tview.append('<td>{}</td>'.format(str(t[5])))
+		#tview.append('<td>{}</td>'.format(str(t[5])))
+		tview.append("<td><span data-toggle='tooltip' title='{0} : Left Click to Copy' onclick='copyToClipboard(&quot;{0}&quot;)'>{1}</span></td>".format(str(token_txid),str(token_txid_d))) #added short token txid 2022-01-07
 		tview.append('</tr>\n')
 		
 	tplot = []
