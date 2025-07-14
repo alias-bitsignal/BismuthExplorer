@@ -2,170 +2,216 @@
 
 Bismuth Explorer Tools DB Module
 
-Version 2.0.1
+Version 2.0.2
 
 """
 
-import sqlite3, time, os, threading, logging, toolsp
+import os
+import time
+import sqlite3
+import logging
 from glob import glob
 from logging.handlers import RotatingFileHandler
+from configparser import ConfigParser
+import toolsp
 
-log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s')
-logFile = 'toolsdb.log'
-my_handler = RotatingFileHandler(logFile, mode='a', maxBytes=5 * 1024 * 1024, backupCount=2, encoding="UTF-8", delay=0)
-my_handler.setFormatter(log_formatter)
-my_handler.setLevel(logging.INFO)
-app_log = logging.getLogger('root')
-app_log.setLevel(logging.INFO)
-app_log.addHandler(my_handler)
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging setup
+# ─────────────────────────────────────────────────────────────────────────────
+LOG_FILE = 'toolsdb.log'
+formatter = logging.Formatter(
+    '%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s'
+)
 
-import configparser as cp
+handler = RotatingFileHandler(
+    LOG_FILE,
+    mode='a',
+    maxBytes=5 * 1024 * 1024,
+    backupCount=2,
+    encoding='utf-8'
+)
+handler.setFormatter(formatter)
+handler.setLevel(logging.INFO)
 
-# Read config
-config = cp.ConfigParser()
-config.readfp(open(r'explorer.ini'))
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
 
-try:
-	bis_root = config.get('My Explorer', 'bisroot')
-except:
-	bis_root = "static/ledger.db"
-try:
-	bis_limit = int(config.get('My Explorer', 'bis_limit'))
-except:
-	bis_limit = 1
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+config = ConfigParser()
+config.read('explorer.ini')
+bis_root = config.get('My Explorer', 'bisroot', fallback='static/ledger.db')
+bis_limit = config.getint('My Explorer', 'bis_limit', fallback=1)
+
+def init_tools_db(db_path='tools.db'):
+    """Create a fresh tools.db with the right schema."""
+    if os.path.exists(db_path):
+        logger.info("Removing existing %s", db_path)
+        os.remove(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS richlist (
+                address TEXT PRIMARY KEY,
+                balance REAL,
+                alias   TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS minerlist (
+                address    TEXT PRIMARY KEY,
+                blatest    INTEGER,
+                bfirst     INTEGER,
+                blockcount INTEGER,
+                treward    REAL,
+                mname      TEXT
+            )
+            """
+        )
+        logger.info("Initialized tools.db with WAL mode")
 
 
-def updatedb(do_first,last_block):
+def gather_all_addresses(conn):
+    """Get all unique recipients with non-zero amount or reward."""
+    rows = conn.execute(
+        "SELECT DISTINCT recipient FROM transactions WHERE amount != 0 OR reward != 0"
+    )
+    return [row[0] for row in rows]
 
-	if do_first:
 
-		if os.path.exists('tools.db'):
-			app_log.info("Tools DB: Already present...deleting")
-			os.remove('tools.db')
-			
-		app_log.info("Tools DB: Create new database")
-		# create empty tools database
-		mlist = sqlite3.connect('tools.db')
-		mlist.text_factory = str
-		m = mlist.cursor()
-		m.execute("CREATE TABLE IF NOT EXISTS richlist (address, balance, alias)")
-		m.execute("CREATE TABLE IF NOT EXISTS minerlist (address, blatest, bfirst, blockcount, treward, mname)")
-		mlist.commit()
-		m.close()
-		mlist.close()
-		# create empty tools.db
+def gather_delta_addresses(conn, limit):
+    """Get unique recipients and senders from the last `limit` transactions."""
+    cur = conn.execute(
+        "SELECT * FROM transactions ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+    )
+    seen = set()
+    for row in cur:
+        recipient = row[2]
+        if recipient and recipient.lower() not in {"hypernode payouts", "development reward"}:
+            seen.add(recipient)
+        sender = row[3]
+        if sender:
+            seen.add(sender)
+    return list(seen)
 
-		print("Filling up the new database.....wait")
-		app_log.info("Tools DB: Getting info.....")
-		
-		r_all = []
-		conn = sqlite3.connect(bis_root)
-		conn.text_factory = str
-		r = conn.cursor()
-		r.execute("SELECT distinct recipient FROM transactions WHERE amount !=0 OR reward !=0;")
-		r_temp = r.fetchall()
-		r.close()
-		
-		r_all = [a[0] for a in r_temp]
-				
-	else:
-		latest_block = int(toolsp.latest()[0])
-		start_block = int(last_block)
-		block_limit = latest_block - start_block
-		
-		print("Tools DB: Getting info.....")
-		app_log.info("Tools DB: Getting info.....")
-		r_all = []
-		conn = sqlite3.connect(bis_root)
-		conn.text_factory = str
-		r = conn.cursor()
-		r.execute("SELECT * FROM transactions ORDER BY timestamp DESC LIMIT ?;", (block_limit,))
-		r_temp = r.fetchall()
-		r.close()
-				
-		for t in r_temp:
-			if t[2] not in r_all:
-				if t[2].lower() == "hypernode payouts" or t[2].lower() == "development reward":
-					app_log.info("Tools DB: Not Hypernode Payouts or Development Reward")
-				else:
-					r_all.append(t[2])
-					#print(t[2])
-			if t[3] not in r_all:
-				r_all.append(t[3])
-				#print(t[3])
-					
-	app_log.info("Tools DB: Updating tools database")
-	print("Tools DB: Updating tools database")
-	mlist = sqlite3.connect('tools.db')
-	mlist.text_factory = str
-	m = mlist.cursor()
-	m.execute("begin")
 
-	for x in r_all:
-	
-		if not do_first:
-			try:
-				m.execute("DELETE FROM richlist WHERE address =?;", (x,))
-				m.execute("DELETE FROM minerlist WHERE address =?;", (x,))
-				m.execute("commit")
-				mlist.commit()
-			except:
-				pass
+def updatedb(do_full, last_block=None, db_path='tools.db'):
+    """Update tools.db fully or incrementally based on last_block."""
+    logger.info("Starting %s update (since=%s)", 'full' if do_full else 'delta', last_block)
 
-		btemp = toolsp.refresh(str(x),2)
-		m_alias = btemp[8]
-		print(str(x))
-		#print(btemp[4])
-		#amirich = float(btemp[4])
-		
-		if float(btemp[4]) > bis_limit:
-			m.execute('INSERT INTO richlist VALUES (?,?,?)', (x,btemp[4],m_alias))
+    if do_full:
+        init_tools_db(db_path)
 
-		if float(btemp[2]) > 0:
-				temp_miner = str(x)
-				m.execute('INSERT INTO minerlist VALUES (?,?,?,?,?,?)', (temp_miner, btemp[5], btemp[6], btemp[7], btemp[2], m_alias))
-		
-	#m.execute("commit")
-	mlist.commit()
-	m.close()
-	mlist.close()
+    # 1) Gather addresses
+    with sqlite3.connect(bis_root) as src_conn:
+        src_conn.row_factory = lambda cursor, row: row
+        if do_full:
+            addresses = gather_all_addresses(src_conn)
+        else:
+            latest_block = int(toolsp.latest()[0])
+            block_limit = latest_block - last_block
+            if block_limit <= 0:
+                logger.info("No new blocks since %s", last_block)
+                return False
+            addresses = gather_delta_addresses(src_conn, block_limit)
 
-	return True
-	
-		
+    if not addresses:
+        logger.info("No addresses to process.")
+        return False
+
+    # 2) Delete old entries (incremental) and insert fresh rows
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("BEGIN")
+        if not do_full:
+            conn.executemany(
+                "DELETE FROM richlist WHERE address = ?",
+                ((addr,) for addr in addresses),
+            )
+            conn.executemany(
+                "DELETE FROM minerlist WHERE address = ?",
+                ((addr,) for addr in addresses),
+            )
+
+        rich_rows = []
+        miner_rows = []
+
+        for addr in addresses:
+            try:
+                record = toolsp.refresh(addr, 2)
+            except Exception:
+                logger.exception("Error refreshing %r", addr)
+                continue
+
+            balance = float(record[4])
+            reward  = float(record[2])
+            alias   = record[8]
+
+            if balance > bis_limit:
+                rich_rows.append((addr, balance, alias))
+            if reward > 0:
+                miner_rows.append((
+                    addr,
+                    record[5],  # blatest
+                    record[6],  # bfirst
+                    record[7],  # blockcount
+                    reward,
+                    alias,
+                ))
+
+        if rich_rows:
+            conn.executemany(
+                "INSERT OR IGNORE INTO richlist(address,balance,alias) VALUES (?,?,?)",
+                rich_rows,
+            )
+        if miner_rows:
+            conn.executemany(
+                "INSERT OR IGNORE INTO minerlist VALUES (?,?,?,?,?,?)",
+                miner_rows,
+            )
+
+        conn.commit()
+
+    logger.info("Completed %s update for %d addresses.", 'full' if do_full else 'delta', len(addresses))
+    return True
+
+
 def buildtoolsdb():
+    fpath = 'blocks.txt'
 
-	fpath = "blocks.txt"
-	if not os.path.exists(fpath):
-		do_first = True
-		latest_block = str(toolsp.latest()[0])
-		with open(fpath, "w") as file:
-			file.write("{}\n".format(latest_block))	
-		bobble = updatedb(do_first,None) 
-	if os.path.exists(fpath):
-		do_first = False
-		while True:
-		
-			for f in glob("static/qr*.png"):
-				os.remove(f)
-			with open(fpath) as f:
-				block_line = f.readline().rstrip()
-				last_block = int(block_line) - 200 # take 200 just in case of rollbacks
-			
-			latest_block = str(toolsp.latest()[0])
-			os.remove(fpath)
-			with open(fpath, "w") as file:
-				file.write("{}\n".format(latest_block))
-			
-			bobble = updatedb(do_first,last_block)
-			print("Tools DB updated: Waiting for 20 minutes.......")
-			time.sleep(1200)
-		
-if __name__ == "__main__":
+    # First run: write latest block and do full update
+    if not os.path.exists(fpath):
+        latest = int(toolsp.latest()[0])
+        with open(fpath, 'w') as f:
+            f.write(f"{latest}\n")
+        updatedb(do_full=True)
 
-	buildtoolsdb()
+    # Main loop: incremental updates every 20 minutes
+    while True:
+        # Cleanup QR images
+        for qr in glob('static/qr*.png'):
+            os.remove(qr)
 
-	#background_thread = threading.Thread(target=buildtoolsdb)
-	#background_thread.daemon = True
-	#background_thread.start()
-	app_log.info("Databases: Start Thread")
+        # Determine last block threshold
+        with open(fpath) as f:
+            last_blk = int(f.readline().strip()) - 200
+
+        # Write new latest
+        latest = int(toolsp.latest()[0])
+        with open(fpath, 'w') as f:
+            f.write(f"{latest}\n")
+
+        # Run incremental update
+        updatedb(do_full=False, last_block=last_blk)
+        logger.info("Sleeping for 20 minutes before next update.")
+        time.sleep(20 * 60)
+
+
+if __name__ == '__main__':
+    buildtoolsdb()
