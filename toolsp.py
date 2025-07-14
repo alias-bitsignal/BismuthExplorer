@@ -560,7 +560,7 @@ def xws(): # list of live wallet servers
 
 	try:
 
-		rep = requests.get("http://api.bismuth.live/servers/wallet/legacy.json")
+		rep = requests.get("https://bismuth.world/api/legacy.json")
 		if rep.status_code == 200:
 			wallets = rep.json()
 							
