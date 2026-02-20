@@ -8,7 +8,18 @@ For license see LICENSE file
 
 For installation see Installation.md
 
-Version 2.1.0 08/11/2020
+Version 2.1.0 2026/02/20
+------------------------
+- performance gain by adding optional SQLite indexes (new indexes/ tools), which can be created/dropped anytime
+- performance gain via new in-process caching (aliases, latest block, circulation, custom aliases)
+- home page refreshed with separate Transactions and Blocks sections
+- new pages: /transactions, /blocks (both paginated)
+- new detail routes: `/tx/<txid>` (base58 or raw txid), `/block/<blocknumber>` (paginated tx list), `/address/<address>` (paginated)
+- txid URLs now use web‑safe base58 (txref); search accepts both raw txid and base58
+- `/token/<tokenname>` updated with paginated token transactions
+- added JSON endpoints for UI refresh: /home_data, /transactions_data, /blocks_data
+
+Version 2.0.1 08/11/2020
 ------------------------
 
 Key Features
