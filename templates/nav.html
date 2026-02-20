@@ -1,5 +1,5 @@
 <nav class="navbar navbar-expand-md navbar-dark bg-dark">
-  <a class="navbar-brand keychainify-checked" href="/"> <img src="static/final.png" width="40" height="40" alt="Bismuth Blockchain Explorer">Bismuth Explorer</a>
+  <a class="navbar-brand keychainify-checked" href="/"> <img src="/static/final.png" width="40" height="40" alt="Bismuth Blockchain Explorer">Bismuth Explorer</a>
   <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarsExample04" aria-controls="navbarsExample04" aria-expanded="false" aria-label="Toggle navigation">
     <span class="navbar-toggler-icon"></span>
   </button>
@@ -36,7 +36,52 @@
         </div>
       </li>
     </ul>
-  <form class="form-inline my-2 my-md-0" action="/search" style="width:100%">
+  <form class="form-inline my-2 my-md-0" action="/search" style="width:100%" onsubmit="return normalizeQuicksearchTxid(this);">
       <input class="form-control" id="quicksearch" type="text" name="quicksearch" placeholder="Search Address, Block, TX ID" aria-label="Search" style="width:100%">
   </form>
 </nav>
+<script>
+function base58Encode(bytes) {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n = 0n;
+  for (let i = 0; i < bytes.length; i++) {
+    n = (n << 8n) + BigInt(bytes[i]);
+  }
+  let encoded = "";
+  while (n > 0n) {
+    const rem = n % 58n;
+    n = n / 58n;
+    encoded = alphabet[Number(rem)] + encoded;
+  }
+  let pad = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] === 0) pad++;
+    else break;
+  }
+  return "1".repeat(pad) + encoded;
+}
+
+function looksLikeTxid(value) {
+  if (!value || value.length !== 56) return false;
+  if (/^[0-9a-fA-F]{56}$/.test(value)) return false;
+  return /[+/=]/.test(value);
+}
+
+function looksLikeBase58(value) {
+  return value && value.length > 56 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(value);
+}
+
+function normalizeQuicksearchTxid(form) {
+  const input = form.querySelector("#quicksearch");
+  if (!input) return true;
+  const value = (input.value || "").trim();
+  if (!value || looksLikeBase58(value) || !looksLikeTxid(value)) return true;
+  try {
+    const bytes = new TextEncoder().encode(value);
+    input.value = base58Encode(bytes);
+  } catch (e) {
+    return true;
+  }
+  return true;
+}
+</script>

@@ -1,64 +1,199 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+.detail-page {
+  padding: 16px 0 40px;
+}
+.detail-panel {
+  background: #202634;
+  border: 1px solid #2b3246;
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.detail-title {
+  font-size: 22px;
+  font-weight: 600;
+}
+.detail-subtitle {
+  color: #d7d6d7;
+  font-size: 13px;
+  margin-top: 4px;
+  word-break: break-word;
+}
+.detail-actions .btn {
+  border-color: #d7d6d7;
+  color: #f2f2f2;
+}
+.detail-actions .btn:hover {
+  color: #202634;
+  background: #d7d6d7;
+}
+.detail-grid {
+  display: block;
+}
+.detail-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.detail-item {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 16px;
+  padding: 5px 0;
+}
+.detail-divider {
+  border-top: 1px solid #2b3246;
+  margin: 12px 0 8px;
+}
+.detail-wide {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  column-gap: 16px;
+  align-items: center;
+  padding: 6px 0 4px;
+}
+.detail-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.detail-label {
+  color: #d7d6d7;
+  font-weight: 600;
+}
+.detail-value {
+  color: #ffffff;
+  text-align: left;
+  word-break: break-word;
+  font-family: monospace;
+}
+.detail-block-title {
+  color: #d7d6d7;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.detail-block-value {
+  color: #ffffff;
+  word-break: break-word;
+  font-family: monospace;
+}
+@media (max-width: 991px) {
+  .detail-item {
+    grid-template-columns: 140px minmax(0, 1fr);
+  }
+  .detail-wide {
+    grid-template-columns: 140px minmax(0, 1fr);
+  }
+}
+</style>
 </head>
 {% include 'nav.html' %}
-	<div class="container">
-		<center><p></p>
-		<h3>Bismuth Cryptocurrency</h3>
-		<p>Transaction Information</p>
+	<div class="container-fluid detail-page">
+		<div class="detail-header">
+			<div>
+				<div class="detail-title">Transaction</div>
+				<div class="detail-subtitle">{{ atxref }}</div>
+			</div>
+			<div class="detail-actions">
+				<button class="btn btn-sm btn-outline-light" onclick="copyToClipboard('{{ atxref }}')">Copy</button>
+			</div>
+		</div>
+
+		<div class="detail-panel">
+			<div class="detail-grid">
+				<ul class="detail-list">
+					<li class="detail-item">
+						<div class="detail-label">Amount</div>
+						<div class="detail-value">{{ aamount }}</div>
+					</li>
+					<li class="detail-item">
+						<div class="detail-label">Sender</div>
+						<div class="detail-value">{{ afrom }}</div>
+					</li>
+					<li class="detail-item">
+						<div class="detail-label">Recipient</div>
+						<div class="detail-value">{{ ato }}</div>
+					</li>
+					<li class="detail-item">
+						<div class="detail-label">Fee</div>
+						<div class="detail-value">{{ afee }}</div>
+					</li>
+				</ul>
+				<div class="detail-divider"></div>
+				<div class="detail-wide">
+					<div class="detail-label">Timestamp</div>
+					<div class="detail-value">{{ atime }} (UTC)</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="detail-panel">
+			<ul class="detail-list">
+				<li class="detail-item">
+					<div class="detail-label">Block</div>
+					<div class="detail-value">{{ ablock }}</div>
+				</li>
+				<li class="detail-item">
+					<div class="detail-label">Block Hash</div>
+					<div class="detail-value">{{ ahash }}</div>
+				</li>
+				<li class="detail-item">
+					<div class="detail-label">Transaction ID</div>
+					<div class="detail-value">{{ atxid }}</div>
+				</li>
+				<li class="detail-item">
+					<div class="detail-label">Transaction Ref</div>
+					<div class="detail-value">{{ atxref }}</div>
+				</li>
+				<li class="detail-item">
+					<div class="detail-label">Reward</div>
+					<div class="detail-value">{{ areward }}</div>
+				</li>
+			</ul>
+		</div>
+
+		<div class="detail-panel">
+			<ul class="detail-list">
+				<li class="detail-item">
+					<div class="detail-label">Operation</div>
+					<div class="detail-value">{{ aoperation }}</div>
+				</li>
+				<li class="detail-item">
+					<div class="detail-label">Openfield (first 1000 chars.)</div>
+					<div class="detail-value">{{ aopen }}</div>
+				</li>
+			</ul>
+		</div>
+
+	<div class="detail-panel">
+			<div class="detail-block-title">Signature</div>
+			<div class="detail-block-value">{{ asig }}</div>
+		</div>
 	</div>
-	<div class="container p-2">
-	<div class="container-fluid" style="font-size: 90%">
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Block</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ ablock }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Block Hash</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ ahash }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Transaction ID</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ atxid }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Timestamp</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ atime }} <span>(UTC)</span></p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Sender</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ afrom }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Recipient</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ ato }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Amount</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ aamount }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Operation</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ aoperation }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Openfield (first 1000 chars.)</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ aopen }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Fee</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ afee }} </p></div>
-		    </div>
-		    <div class="row my-2">
-		        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Reward</p></div>
-		        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ areward }} </p></div>
-		    </div>
-	    <div class="row my-2 mb-5">
-	        <div class="col-sm-3 border-bottom"><p class="text text-secondary pt-2">Signature</p></div>
-	        <div class="col-sm-9 border-bottom"><p class="text-break pt-2"> {{ asig }} </p></div> 
-	    </div>
-	</div>
-	</div>
+
+<script>
+  (function() {
+    if (!window.location.search) return;
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has('myaddress')) return;
+      url.searchParams.delete('myaddress');
+      const qs = url.searchParams.toString();
+      const clean = qs ? (url.pathname + '?' + qs) : url.pathname;
+      window.history.replaceState({}, '', clean);
+    } catch (e) {}
+  })();
+</script>
 
 {% endblock %}

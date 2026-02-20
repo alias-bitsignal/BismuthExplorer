@@ -2,7 +2,7 @@
 
 {% block content %}
 <style>
-.token-page {
+.block-page {
   padding: 16px 0 40px;
 }
 .detail-panel {
@@ -29,7 +29,6 @@
   font-size: 13px;
   margin-top: 4px;
   word-break: break-word;
-  font-family: monospace;
 }
 .detail-actions .btn {
   border-color: #d7d6d7;
@@ -170,14 +169,14 @@
 </head>
 {% include 'nav.html' %}
 
-<div class="container-fluid token-page">
+<div class="container-fluid block-page">
   <div class="detail-header">
     <div>
-      <div class="detail-title">Token</div>
-      <div class="detail-subtitle">{{ token_name }}</div>
+      <div class="detail-title">Block</div>
+      <div class="detail-subtitle">{{ block_height }}</div>
     </div>
     <div class="detail-actions">
-      <button class="btn btn-sm btn-outline-light" onclick="copyToClipboard('{{ token_name }}')">Copy</button>
+      <button class="btn btn-sm btn-outline-light" onclick="copyToClipboard('{{ block_height }}')">Copy</button>
     </div>
   </div>
 
@@ -191,20 +190,26 @@
   <div class="detail-panel">
     <ul class="detail-list">
       <li class="detail-item">
-        <div class="detail-label">Token</div>
-        <div class="detail-value">{{ details.token }}</div>
+        <div class="detail-label">Block</div>
+        <div class="detail-value">{{ details.height }}</div>
       </li>
       <li class="detail-item">
-        <div class="detail-label">Quantity</div>
-        <div class="detail-value">{{ details.quantity }}</div>
+        <div class="detail-label">Block Hash</div>
+        <div class="detail-value">{{ details.block_hash }}</div>
       </li>
       <li class="detail-item">
-        <div class="detail-label">Issued By</div>
-        <div class="detail-value"><a href="/search?quicksearch={{ details.issued_by }}">{{ details.issued_by }}</a></div>
+        <div class="detail-label">Miner</div>
+        <div class="detail-value">
+          {% if details.miner %}
+            <a href="/address/{{ details.miner }}">{{ details.miner }}</a>
+          {% else %}
+            -
+          {% endif %}
+        </div>
       </li>
       <li class="detail-item">
-        <div class="detail-label">Issue Block</div>
-        <div class="detail-value"><a href="/block/{{ details.issue_block }}">{{ details.issue_block }}</a></div>
+        <div class="detail-label">Reward</div>
+        <div class="detail-value">{{ details.reward }}</div>
       </li>
       <li class="detail-item">
         <div class="detail-label">Txid</div>
@@ -233,12 +238,12 @@
     <div class="demo-pagination">
       <div>
         {% if has_before %}
-          <a href="/token/{{ token_name }}">Latest</a>
+          <a href="/block/{{ block_height }}">Latest</a>
         {% endif %}
       </div>
       <div>
         {% if has_next %}
-          <a href="/token/{{ token_name }}?before={{ next_cursor }}">Next</a>
+          <a href="/block/{{ block_height }}?before={{ next_cursor }}">Next</a>
         {% endif %}
       </div>
     </div>

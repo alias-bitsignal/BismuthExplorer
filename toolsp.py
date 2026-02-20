@@ -2,18 +2,22 @@
 
 Bismuth Explorer Proceedures Module
 
-Version 2.0.1
+Version 2.1.0
 
 """
 
-import sqlite3, time, json, requests, re, socks, connections
+import sqlite3, time, json, requests, re, socks, connections, logging, os
 
 import configparser as cp
 from bs4 import BeautifulSoup
 
+_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+_BASE58_INDEX = {c: i for i, c in enumerate(_BASE58_ALPHABET)}
+
 # Read config
 config = cp.ConfigParser()
-config.readfp(open(r'explorer.ini'))
+with open('explorer.ini', 'r') as cfg_file:
+	config.read_file(cfg_file)
 
 try:
 	db_root = config.get('My Explorer', 'dbroot')
@@ -35,8 +39,67 @@ try:
 	port = config.get('My Explorer', 'nodeport')
 except:
 	port = "5658"
+try:
+	circ_cache_path = config.get('My Explorer', 'circ_cache')
+except:
+	circ_cache_path = "static/circ_cache.json"
 
 db_hyper = True
+
+_CACHE_MISS = object()
+_alias_cache = {}
+_latest_cache = {}
+_circ_cache = {}
+_details_cache = {}
+_custom_cache = {"ts": 0.0, "alias_by_address": {}, "address_by_alias": {}}
+
+_ALIAS_TTL_SECONDS = 600
+_LATEST_TTL_SECONDS = 1.5
+_CIRC_TTL_SECONDS = 900
+_CUSTOM_TTL_SECONDS = 60
+_SLOW_TOOLSP_CALL_MS = 300
+_DETAILS_TTL_SECONDS = 60
+
+_toolsp_log = logging.getLogger("toolsp")
+
+def _cache_get(cache, key, ttl_seconds):
+	now = time.time()
+	entry = cache.get(key)
+	if not entry:
+		return _CACHE_MISS
+	ts, value = entry
+	if now - ts > ttl_seconds:
+		cache.pop(key, None)
+		return _CACHE_MISS
+	return value
+
+def _cache_set(cache, key, value):
+	cache[key] = (time.time(), value)
+
+def _load_custom_cache():
+	now = time.time()
+	if now - _custom_cache["ts"] <= _CUSTOM_TTL_SECONDS:
+		return
+	alias_by_address = {}
+	address_by_alias = {}
+	try:
+		with open('custom.txt', 'r') as infile:
+			for line in infile:
+				parts = line.split(':')
+				if len(parts) < 2:
+					continue
+				alias = parts[0].strip()
+				address = parts[1].strip()
+				if address:
+					alias_by_address[address] = alias
+				if alias:
+					address_by_alias[alias] = address
+	except:
+		alias_by_address = {}
+		address_by_alias = {}
+	_custom_cache["alias_by_address"] = alias_by_address
+	_custom_cache["address_by_alias"] = address_by_alias
+	_custom_cache["ts"] = now
 
 def get_one_arg(gcom,arg1):
 
@@ -76,6 +139,25 @@ def get_no_arg(gcom):
 
 def getcirc():
 
+	cached = _cache_get(_circ_cache, "circ", _CIRC_TTL_SECONDS)
+	if cached is not _CACHE_MISS:
+		return cached
+	try:
+		if circ_cache_path and os.path.isfile(circ_cache_path):
+			with open(circ_cache_path, "r") as infile:
+				data = json.load(infile)
+			ts = float(data.get("timestamp", 0))
+			if time.time() - ts <= _CIRC_TTL_SECONDS:
+				total = data.get("total")
+				circulating = data.get("circulating")
+				if total is not None and circulating is not None:
+					result = (str(total), str(circulating))
+					_cache_set(_circ_cache, "circ", result)
+					return result
+	except Exception:
+		pass
+
+	t0 = time.time()
 	conn = sqlite3.connect(bis_root)
 	conn.text_factory = str
 	c = conn.cursor()
@@ -111,8 +193,13 @@ def getcirc():
 
 	c.close()
 	conn.close()
+	dt_ms = (time.time() - t0) * 1000.0
+	if dt_ms >= _SLOW_TOOLSP_CALL_MS:
+		_toolsp_log.warning("slow call %dms toolsp.getcirc", int(dt_ms))
 	
-	return total,circulating
+	result = (total, circulating)
+	_cache_set(_circ_cache, "circ", result)
+	return result
 
 def rev_alias(tocheck):
 
@@ -130,11 +217,8 @@ def rev_alias(tocheck):
 	except:
 		r_addy = "0"
 		
-	with open('custom.txt', 'r') as infile:
-		for line in infile:
-			cust = line.split(':')
-			if t_addy == cust[0].strip():
-				r_addy = cust[1].strip()
+	_load_custom_cache()
+	r_addy = _custom_cache["address_by_alias"].get(t_addy, r_addy)
 		
 	#print(r_addy)
 	return str(r_addy)
@@ -162,8 +246,11 @@ def display_time(seconds, granularity=2):
 
 def latest():
 
+	cached = _cache_get(_latest_cache, "latest", _LATEST_TTL_SECONDS)
+	if cached is not _CACHE_MISS:
+		return cached
+
 	block_get = get_no_arg("blocklast")
-	
 	diff = get_no_arg("difflast")
 	
 	db_block_height = str(block_get[0])
@@ -177,7 +264,9 @@ def latest():
 	#last_block_ago = '%.2f' % last_block_ago
 	diff_block_previous = diff[1]
 
-	return db_block_height, last_block_ago, diff_block_previous, db_block_finder, db_timestamp_last, db_block_hash, db_block_open, db_block_txid
+	result = (db_block_height, last_block_ago, diff_block_previous, db_block_finder, db_timestamp_last, db_block_hash, db_block_open, db_block_txid)
+	_cache_set(_latest_cache, "latest", result)
+	return result
 
 	
 def get_block_time(my_hist):
@@ -190,40 +279,50 @@ def get_block_time(my_hist):
 	conn = sqlite3.connect(bis_root)
 	conn.text_factory = str
 	c = conn.cursor()
-	c.execute("SELECT timestamp,block_height FROM transactions WHERE reward !=0 and block_height >= ?;",(str(sb_height),))
-	result = c.fetchall()
+	try:
+		c.execute("SELECT timestamp,block_height FROM transactions WHERE reward !=0 and block_height >= ?;",(str(sb_height),))
+		result = c.fetchall()
 
-	l = []
-	y = 0
-	for x in result:
-		if y == 0:
-			ts_difference = 0
-		else:
-			ts_difference = float(x[0]) - float(y)
-		ts_block = x[1]
-		#print(str(x[1])+" "+str(ts_difference))
-		tx = (ts_block,ts_difference)
-		l.append(tx)
-		y = x[0]
-
-	return l
+		l = []
+		y = 0
+		for x in result:
+			if y == 0:
+				ts_difference = 0
+			else:
+				ts_difference = float(x[0]) - float(y)
+			ts_block = x[1]
+			#print(str(x[1])+" "+str(ts_difference))
+			tx = (ts_block,ts_difference)
+			l.append(tx)
+			y = x[0]
+		return l
+	finally:
+		c.close()
+		conn.close()
 
 
 def get_the_details(getdetail, get_addy):
 
+	t0 = time.time()
 	m_stuff = "{}%".format(str(getdetail))
+	cache_key = (getdetail, get_addy or "")
+	cached = _cache_get(_details_cache, cache_key, _DETAILS_TTL_SECONDS)
+	if cached is not _CACHE_MISS:
+		return cached
 	
 	if db_hyper:
 	
 		conn = sqlite3.connect(hyper_root)
 		conn.text_factory = str
 		c = conn.cursor()
-		c.execute("PRAGMA case_sensitive_like=OFF;")
-		c.execute("SELECT * FROM transactions WHERE signature LIKE ?;", (m_stuff,))
-		m_detail = c.fetchone()
-		#print(m_detail)
-		c.close()
-		conn.close()
+		try:
+			c.execute("PRAGMA case_sensitive_like=ON;")
+			c.execute("SELECT * FROM transactions WHERE signature LIKE ?;", (m_stuff,))
+			m_detail = c.fetchone()
+			#print(m_detail)
+		finally:
+			c.close()
+			conn.close()
 		
 		if not m_detail:
 		
@@ -232,14 +331,21 @@ def get_the_details(getdetail, get_addy):
 				conn = sqlite3.connect(bis_root)
 				conn.text_factory = str
 				c = conn.cursor()
-				c.execute("SELECT * FROM transactions WHERE address = ?;", (get_addy,))
-				t_detail = c.fetchall()
-				c.close()
-				conn.close()
-
-				x_detail = [sig for sig in t_detail if getdetail in sig[5]]
-				
-				m_detail = x_detail[0]
+				try:
+					c.execute(
+						"""
+						SELECT * FROM transactions
+						WHERE (address = ? OR recipient = ?)
+						  AND signature LIKE ?;
+						""",
+						(get_addy, get_addy, m_stuff)
+					)
+					m_detail = c.fetchone()
+				finally:
+					c.close()
+					conn.close()
+				if not m_detail:
+					m_detail = None
 				
 			else:
 				
@@ -247,8 +353,36 @@ def get_the_details(getdetail, get_addy):
 
 	else:
 
-		m_detail = get_two_arg("api_gettransaction",m_stuff,False)
+		m_detail = None
+
+	if not m_detail:
+		conn = sqlite3.connect(bis_root)
+		conn.text_factory = str
+		c = conn.cursor()
+		try:
+			c.execute("PRAGMA case_sensitive_like=ON;")
+			if get_addy:
+				c.execute(
+					"""
+					SELECT * FROM transactions
+					WHERE (address = ? OR recipient = ?)
+					  AND signature LIKE ?;
+					""",
+					(get_addy, get_addy, m_stuff)
+				)
+			else:
+				c.execute("SELECT * FROM transactions WHERE signature LIKE ?;", (m_stuff,))
+			m_detail = c.fetchone()
+		finally:
+			c.close()
+			conn.close()
+		if not m_detail:
+			m_detail = get_two_arg("api_gettransaction", m_stuff, False)
 	
+	dt_ms = (time.time() - t0) * 1000.0
+	if dt_ms >= _SLOW_TOOLSP_CALL_MS:
+		_toolsp_log.warning("slow call %dms toolsp.get_the_details", int(dt_ms))
+	_cache_set(_details_cache, cache_key, m_detail)
 	return m_detail
 
 def test(testString):
@@ -276,6 +410,8 @@ def test(testString):
 	
 def s_test(testString):
 
+	if not testString:
+		return False
 	if testString.isalnum() == True:
 
 		try:
@@ -299,6 +435,71 @@ def d_test(testString):
 			return True
 	else:
 		return False
+
+def _base58_encode(data):
+	if not data:
+		return ""
+	n = int.from_bytes(data, "big")
+	encoded = ""
+	while n > 0:
+		n, rem = divmod(n, 58)
+		encoded = _BASE58_ALPHABET[rem] + encoded
+	pad = 0
+	for b in data:
+		if b == 0:
+			pad += 1
+		else:
+			break
+	return ("1" * pad) + encoded
+
+def _base58_decode(value):
+	if not value:
+		return b""
+	n = 0
+	for ch in value:
+		idx = _BASE58_INDEX.get(ch)
+		if idx is None:
+			raise ValueError("invalid base58 character")
+		n = n * 58 + idx
+	if n == 0:
+		decoded = b""
+	else:
+		decoded = n.to_bytes((n.bit_length() + 7) // 8, "big")
+	pad = 0
+	for ch in value:
+		if ch == "1":
+			pad += 1
+		else:
+			break
+	return (b"\x00" * pad) + decoded
+
+def decode_base58_txid(value):
+	if not value:
+		return None
+	if len(value) <= 56:
+		return None
+	if any(ch not in _BASE58_INDEX for ch in value):
+		return None
+	try:
+		decoded = _base58_decode(value)
+		text = decoded.decode("utf-8")
+	except Exception:
+		return None
+	if len(text) != 56:
+		return None
+	return text
+
+def normalize_txid_input(value):
+	decoded = decode_base58_txid(value)
+	return decoded if decoded else value
+
+def txid_to_base58(value):
+	if not value:
+		return value
+	decoded = decode_base58_txid(value)
+	if decoded:
+		return _base58_encode(decoded.encode("utf-8"))
+	return _base58_encode(str(value).encode("utf-8"))
 
 def miners():
 
@@ -372,6 +573,10 @@ def get_cmc_val(y_data):
 
 def get_alias(address):
 
+	cached = _cache_get(_alias_cache, address, _ALIAS_TTL_SECONDS)
+	if cached is not _CACHE_MISS:
+		return cached
+
 	try:
 		
 		t_alias = get_one_arg("aliasget",address)
@@ -389,13 +594,10 @@ def get_alias(address):
 	except:
 		r_alias = ""
 	
-	with open('custom.txt', 'r') as infile:
-		for line in infile:
-			cust = line.split(':')
-			if address == cust[1].strip():
-				r_alias = cust[0].strip()
-				#print(r_alias)
-		
+	_load_custom_cache()
+	r_alias = _custom_cache["alias_by_address"].get(address, r_alias)
+
+	_cache_set(_alias_cache, address, r_alias)
 	return r_alias
 
 	
@@ -467,37 +669,33 @@ def refresh(testAddress,typical):
 		
 	credit = float(0)
 	try:
-		c.execute("SELECT amount FROM transactions WHERE recipient = ?;",(testAddress,))
-		entries = c.fetchall()
-	except:
-		entries = []
-	try:
-		for entry in entries:	
-			credit = credit + float(entry[0])
-			credit = 0 if credit is None else credit
+		c.execute("SELECT sum(amount) FROM transactions WHERE recipient = ?;", (testAddress,))
+		row = c.fetchone()
+		credit = row[0] if row and row[0] is not None else 0
 	except:
 		credit = 0
-		
-	c.execute("SELECT sum(amount),sum(fee),sum(reward) FROM transactions WHERE address = ?;",(testAddress,))
-	tester = c.fetchall()
 
-	debit = tester[0][0]
-	fees = tester[0][1]
-	rewards = tester[0][2]
+	c.execute("SELECT sum(amount),sum(fee),sum(reward) FROM transactions WHERE address = ?;", (testAddress,))
+	tester = c.fetchone() or (0, 0, 0)
+
+	debit = tester[0]
+	fees = tester[1]
+	rewards = tester[2]
 	
 	if not rewards:
 		rewards = 0
 	
 	if rewards > 0:		
-		c.execute("SELECT count(*) FROM transactions WHERE address = ? AND (reward != 0);",(testAddress,))
-		b_count = c.fetchone()[0]
-		c.execute("SELECT MAX(timestamp) FROM transactions WHERE recipient = ? AND (reward !=0);",(testAddress,))
-		t_max = c.fetchone()[0]
-		c.execute("SELECT MIN(timestamp) FROM transactions WHERE recipient = ? AND (reward !=0);",(testAddress,))
-		t_min = c.fetchone()[0]
+		c.execute("SELECT count(*) FROM transactions WHERE address = ? AND (reward != 0);", (testAddress,))
+		row = c.fetchone()
+		b_count = row[0] if row and row[0] is not None else 0
+		c.execute("SELECT MAX(timestamp), MIN(timestamp) FROM transactions WHERE recipient = ? AND (reward !=0);", (testAddress,))
+		row = c.fetchone()
+		t_max = row[0] if row and row[0] is not None else 0
+		t_min = row[1] if row and row[1] is not None else 0
 
-		t_min = str(time.strftime("at %H:%M:%S on %d/%m/%Y", time.gmtime(float(t_min))))
-		t_max = str(time.strftime("at %H:%M:%S on %d/%m/%Y", time.gmtime(float(t_max))))
+		t_min = str(time.strftime("at %H:%M:%S on %d/%m/%Y", time.gmtime(float(t_min)))) if t_min else 0
+		t_max = str(time.strftime("at %H:%M:%S on %d/%m/%Y", time.gmtime(float(t_max)))) if t_max else 0
 	else:
 		b_count = 0
 		t_min = 0
@@ -560,7 +758,7 @@ def xws(): # list of live wallet servers
 
 	try:
 
-		rep = requests.get("https://bismuth.world/api/legacy.json")
+		rep = requests.get("https://bismuth.world/api/legacy.json", timeout=10)
 		if rep.status_code == 200:
 			wallets = rep.json()
 							
@@ -571,4 +769,3 @@ def xws(): # list of live wallet servers
 		x = ""
 		
 	return x
-

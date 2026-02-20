@@ -3,17 +3,28 @@
 <head>
 	<meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=yes">
-	<meta name="description" content="Bismuth Blockchain Explorer is an open source block explorer providing detailed tracking-free blockchain data.">
-  <meta name="keywords" content="Bismuth, Blockchain, Blockchain Explorer, Cryptocurrency, Crypto">
-	<link rel = "icon" href = "static/favicon.ico" type = "image/x-icon" />
+	<meta name="description" content="Bismuth Python Blockchain Explorer is an open source block explorer providing detailed tracking-free cryptocurrency data.">
+  <meta name="keywords" content="Bismuth, Python Blockchain, Blockchain Explorer, Cryptocurrency, Crypto">
+	<link rel = "icon" href = "/static/favicon.ico" type = "image/x-icon" />
+    
+        <script src="https://unpkg.com/gridjs/dist/gridjs.production.min.js"></script>
+        <link href="https://cdn.jsdelivr.net/npm/gridjs/dist/theme/mermaid.min.css" rel="stylesheet" />
+
+	<!-- Add jquery 3.6.0 -->
+	<!-- <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script> -->
+	
+	<!-- Add ajax popper 2.9.2 -->
+	<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/2.9.2/umd/popper.min.js" integrity="sha512-2rNj2KJ+D8s1ceNasTIex6z4HWyOnEYLVC3FigGOmyQCZc2eBXKgOxQmo3oKLHyfcj53uz4QMsRCWNbLd32Q1g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script> -->
 
 	<!-- Bundle which combines a compatible version of bootstrap and popper // https://getbootstrap.com/docs/4.5/getting-started/introduction/ -->
-	<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
+	<!-- <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script> -->
+	 <script src="/static/jquery-3.6.0.slim.min.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-ho+j7jyWK8fNQe+A12Hb8AhRq26LrZ/JpcUGGOn+Y7RsweNrtN/tE3MoK7ZeZDyx" crossorigin="anonymous"></script>
 
-    <!-- Bootstrap CSS -->
+	<!-- Bootstrap CSS -->
 	<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
-	<link rel="stylesheet" type="text/css" href="static/custom.css">
+	<link rel="stylesheet" type="text/css" href="/static/custom.css">
+	
 	<title>Bismuth Blockchain Explorer</title>
 	
 	<script type="text/javascript" charset="utf-8">
@@ -39,18 +50,23 @@
 
 	{% block content %}{% endblock %}
 	
-	<center><p>&copy; Ian Mac Fhíobhuí and The Bismuth Foundation, 2021</p></center>
-	
+	<!-- <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script> -->
+	<!-- <script src="https://code.jquery.com/jquery-3.6.0.slim.min.js" integrity="sha256-u7e5khyithlIdTpu22PHhENmPcRdFiHRjhAuHcs05RI=" crossorigin="anonymous"></script> -->
+	<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script> -->
+	<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/2.9.2/umd/popper.min.js" integrity="sha512-2rNj2KJ+D8s1ceNasTIex6z4HWyOnEYLVC3FigGOmyQCZc2eBXKgOxQmo3oKLHyfcj53uz4QMsRCWNbLd32Q1g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script> -->
+	<!-- <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script> -->
+        <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script> -->	
+
 	<footer class="container py-5">
 		<div class="row">
 			<div class="col-12 col-md">
 	
-				<small class="d-block mb-3 text-muted">&copy; Ian Mac Fhíobhuí & The Bismuth Foundation, 2022</small>
+				<small class="d-block mb-3 text-muted">&copy; <a href="https://github.com/alias-bitsignal/BismuthExplorer" target="_blank">GPL-3.0 license</a></small>
 			</div>
 			<div class="col-6 col-md">
 				<h5>Wallets</h5>
 				<ul class="list-unstyled text-small">
-					<li><a class="text-muted small" href="https://github.com/bismuthfoundation/TornadoWallet/releases/tag/v0.1.38">Tornado Bismuth Wallet</a></li>
+					<li><a class="text-muted small" href="https://github.com/bismuthfoundation/TornadoWallet/releases">Tornado Bismuth Wallet</a></li>
 					<li><a class="text-muted small" href="https://github.com/bismuthfoundation/tk-wallet/releases">TK Wallet</a></li>
 					<li><a class="text-muted small" href="https://mybismuth.com/">myBismuth Wallet (Android)</a></li>
 					<li><a class="text-muted small" href="https://github.com/AngainorDev/BIS-Paper">Bismuth Paper Wallet</a></li>
@@ -61,33 +77,31 @@
 				<ul class="list-unstyled text-small">
 					<li><a class="text-muted small" href="https://github.com/bismuthfoundation/kbkminer">PoW kbkminer</a></li>
 					<li><a class="text-muted small" href="http://eggpool.net/">PoW Eggpool</a></li>
-					<li><a class="text-muted small" href="https://hypernodes.bismuth.live/?page_id=163">PoS Bismuth Hypernode</a></li>
+					<li><a class="text-muted small" href="https://bismuth.world">PoS Bismuth Hypernode</a></li>
 					<li><a class="text-muted small" href="https://github.com/bismuthfoundation/hypernode/tree/beta99">Github Hypernode</a></li>
 				</ul>
 			</div>
 			<div class="col-6 col-md">
 				<h5>Exchanges</h5>
 				<ul class="list-unstyled text-small">
-					<li><a class="text-muted small" href="https://qtrade.io/market/BIS_BTC">Qtrade</a></li>
-					<li><a class="text-muted small" href="https://graviex.net/markets/bisbtc">Graviex</a></li>
-					<li><a class="text-muted small" href="https://v2.info.uniswap.org/pair/0xf4f82f8d84c529987201609cecee8ab136a50c8c">Uniswap ETH-wBIS (DEX)</a></li>
-					<li><a class="text-muted small" href="https://exchange.pancakeswap.finance/#/swap?inputCurrency=0x56672ecb506301b1e32ed28552797037c54d36a9">PancakeSwap BNB-wBIS (DEX)</a></li>
-					<li><a class="text-muted small" href="https://x.vite.net/trade?symbol=BIS-000_BTC-000&category=BTC">Vite (DEX)</a></li>
+					<li><a class="text-muted small" href="https://www.dextools.io/app/ether/pair-explorer/0xf4f82f8d84c529987201609cecee8ab136a50c8c">Uniswap ETH-wBIS (DEX)</a></li>
+					<li><a class="text-muted small" href="https://www.dextools.io/app/bsc/pair-explorer/0x731b8244f818fd488d9dc516edd976a96459ae59">PancakeSwap BNB-wBIS (DEX)</a></li>
 				</ul>
 			</div>
 			<div class="col-6 col-md">
 				<h5>About</h5>
 				<ul class="list-unstyled text-small">
-					<li><a class="text-muted small" href="https://bismuthplatform.com/">Official Website</a></li>
-					<li><a class="text-muted small" href="https://bismuthplatform.com/whitepaper.pdf">Bismuth Whitepaper</a></li>
-					<li><a class="text-muted small" href="https://hypernodes.bismuth.live/?page_id=20">Bismuth Blog</a></li>
-					<li><a class="text-muted small" href="https://bismuthplatform.com/discord">Bismuth Discord</a></li>
+					<li><a class="text-muted small" href="https://bismuthcoin.org/">Bismuth Website</a></li>
+					<li><a class="text-muted small" href="https://bismuthcoin.org/docs/papers/whitepaper/">Bismuth Whitepaper</a></li>
+					<li><a class="text-muted small" href="https://linktr.ee/bismuthcoin">Bismuth Linktr.ee</a></li>
+					<li><a class="text-muted small" href="https://discord.com/invite/mfxEHek">Bismuth Discord</a></li>
 					<li><a class="text-muted small" href="https://t.me/cryptobismuth">Bismuth Telegram</a></li>
 					<li><a class="text-muted small" href="https://bitcointalk.org/index.php?topic=1896497.0">Bitcointalk Thread</a></li>
 					<li><a class="text-muted small" href="https://www.reddit.com/r/cryptobismuth/">Reddit Bismuth</a></li>
+					<li><a class="text-muted small" rel="me" href="https://mstdn.social/@bis">Mastodon</a></li>
 				</ul>
 			</div>
 		</div>
-	</footer>	
+	</footer>
 </body>
 </html>

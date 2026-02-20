@@ -13,16 +13,30 @@
 		</center>
 	</div>
 	<p></p>
-	<div  class="container">
-	<table style="font-size: 80%" class="table table-striped table-sm">
+	<div class="container">
+	<div class="table-responsive">
+	<table style="font-size: 80%" class="table table-striped table-sm miners">
 	<thead>
 		<tr>
-		<th scope="col" bgcolor="#D0F7C3">Rank</th>
-		<th scope="col" bgcolor="#D0F7C3">Miner</th>
-		<th scope="col" bgcolor="#D0F7C3">Blocks Found</th>
+		<th scope="col" bgcolor="#212534">Rank</th>
+		<th scope="col" bgcolor="#212534">Miner</th>
+		<th scope="col" bgcolor="#212534">Blocks Found</th>
 		</tr>
 	</thead>
 	{{ miners|safe }}
 	</table>
+	</div>
+	<div class="d-flex justify-content-between mt-2">
+		<div>
+			{% if has_before %}
+			<a href="/minerquery?before=0{% if myaddy %}&myaddy={{ myaddy }}{% endif %}">Latest</a>
+			{% endif %}
+		</div>
+		<div>
+			{% if has_next %}
+			<a href="/minerquery?before={{ next_cursor }}{% if myaddy %}&myaddy={{ myaddy }}{% endif %}">Next</a>
+			{% endif %}
+		</div>
+	</div>
 	</div>
 {% endblock %}

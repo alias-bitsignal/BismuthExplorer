@@ -1,7 +1,29 @@
-.navbar{background:#222222;}
+/* .navbar{background:#2b2037;} .bg-dark{background:linear-gradient(60deg, #7b1fa2, #7367f0);} body{background-color:#161d31;} */
+.navbar{background:#2b2037;} .bg-dark{background:#161d31!important;border-bottom:1px solid #334475;} body{background-color:#161d31;} 
+body{color:#d6d6d6;} .table{color:#d7d6d7;} .table-responsive{padding:5px;} .address-tx-list{background-color:#343d55;} 
+.card{background-color:#283046;} .card-header{background-color:#343d55;} .toast{background-color:#242a3c;} 
+.card table td{word-break:break-word;}
+.border-bottom{border-bottom:1px solid #140f1c!important;} .table td, .table th{border-top:1px solid #151e31;} 
+.table thead th{border-bottom:2px solid #343d55;background-color:#2e354a;} 
+.table-sm td, .table-sm th{padding:.5rem;}
+.container-fluid{width:97%;} 
+.container-fluid-info{background-color:#161d31;padding-right:15px;padding-left:15px;margin-right:auto;margin-left:auto;}
+.form-control{background-color:#161d31;border:1px solid #334475; color:#e7e7e7;} .form-control:hover{background-color:#0c1222;} 
+.form-control:focus{background-color:#0c1222;color:#d6d6d6;}
+.richlist{background-color:#242a3c;}
+.walletserver{background-color:#242a3c;}
+.api{background-color:#242a3c;}
+.miners{background-color:#242a3c;}
+.latest-transactions{background-color:#242a3c;}
+.container-fluid.tx-detail{background-color:#283046;}
+
 .nav-item::after{content:'';display:block;width:0px;height:2px;background:#cce6ff;transition: 0.2s;}
 .nav-item:hover::after{width:100%;}
-.navbar-dark .navbar-nav .active > .nav-link, .navbar-dark .navbar-nav .nav-link.active, .navbar-dark .navbar-nav .nav-link.show, .navbar-dark .navbar-nav .show > .nav-link,.navbar-dark .navbar-nav .nav-link:focus, .navbar-dark .navbar-nav .nav-link:hover{color:#cce6ff;}
+.navbar-dark .navbar-nav .active > .nav-link, .navbar-dark .navbar-nav .nav-link.active, .navbar-dark .navbar-nav .nav-link.show, .navbar-dark >
 .nav-link{padding:15px 5px;transition:0.2s;}
-.dropdown-item.active, .dropdown-item:active{color:#212529;}
+.dropdown-item.active, .dropdown-item:active{color:#d6d6d6;}
 .dropdown-item:focus, .dropdown-item:hover{background:#cce6ff;}
+.dropdown-menu.show{background:#161d31;border:1px solid #334475;}
+
+.dropdown-menu a{color: #F1F1F1; !important}
+

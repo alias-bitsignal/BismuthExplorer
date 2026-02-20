@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+{% include 'nav.html' %}
+
+<div class="container">
+    <center>
+        <p></p>
+        <h3>Bismuth Rich List</h3>
+        <p style="font-size: 85%"><b>List of all Bismuth addresses with more than {{ bislim|safe }} BIS</b></p>
+        <p style="font-size: 75%">Note: this page may be up to 45 mins behind</p>
+        <p></p>
+    </center>
+    <div align="right">
+        <form method="post" action="/toplist">
+            <table style="font-size: 80%">
+		<tr><th><label for="my_curr">Change currency</label></th>
+                <td><select name="my_curr">
+                <option value="BTC">BTC</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+                <option value="CNY">CNY</option>
+                <option value="AUD">AUD</option>
+                </select><th><label for="Submit Query"> </label></th><td><button id="Submit Query" name="Submit Query">Go</button></td></tr>
+            </table>
+        </form>
+    </div>
+</div>
+<p></p>
+<div class="container" id="toplist-table"></div>
+
+<script>
+    const grid = new gridjs.Grid({  // Change 'gridjs' to 'GridJS'
+        columns: [
+            {id: 'rank', name: 'Rank'},
+            {id: 'address', name: 'Address'},
+            {id: 'alias', name: 'Alias'},
+            {id: 'balance_bis', name: 'Balance (BIS)'},
+            {id: 'balance_defcurr', name: 'Balance ({{ defcurr|safe }})'}
+        ],
+        data: {{ all|tojson }},
+        sort: true,
+        search: true,
+        pagination: {
+            enabled: true,
+            limit: 20
+        }
+    }).render(document.getElementById("toplist-table"));
+</script>
+
+{% endblock %}

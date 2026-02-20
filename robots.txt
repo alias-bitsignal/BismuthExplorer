@@ -1,0 +1,7 @@
+User-Agent: *
+Disallow: /search?quicksearch=*
+Disallow: /ledgerquery
+Disallow: /richest
+Disallow: /minerquery?*
+Disallow: /details?*
+Disallow: /tx/

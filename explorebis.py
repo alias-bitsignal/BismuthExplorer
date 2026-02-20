@@ -2,7 +2,7 @@
 
 Bismuth Explorer Main Module
 
-Version 2.0.2
+Version 2.1.0
 
 """
 from geventwebsocket.handler import WebSocketHandler
@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 from threading import Lock
 from decimal import *
 
-from flask import Flask, render_template, session, request, Markup, Response
+from flask import Flask, render_template, session, request, Markup, Response, jsonify, redirect
 from flask_socketio import SocketIO, emit, join_room, leave_room, \
     close_room, rooms, disconnect
 
@@ -26,7 +26,8 @@ import configparser as cp
 
 # Read config
 config = cp.ConfigParser()
-config.readfp(open(r'explorer.ini'))
+with open('explorer.ini', 'r') as cfg_file:
+    config.read_file(cfg_file)
 
 try:
     alt_curr = config.get('My Explorer', 'altcurrency')
@@ -64,6 +65,68 @@ try:
     bis_root = config.get('My Explorer', 'bisroot')
 except:
     bis_root = "static/ledger.db"
+
+_EXPLORER_INDEXES = {
+    "idx_tx_reward_ts_sig": (
+        "CREATE INDEX IF NOT EXISTS idx_tx_reward_ts_sig "
+        "ON transactions(reward, timestamp DESC, signature DESC)"
+    ),
+    "idx_tx_reward_block": (
+        "CREATE INDEX IF NOT EXISTS idx_tx_reward_block "
+        "ON transactions(reward, block_height DESC)"
+    ),
+    "idx_tx_block_height": (
+        "CREATE INDEX IF NOT EXISTS idx_tx_block_height "
+        "ON transactions(block_height)"
+    ),
+    "idx_tx_address_ts_sig": (
+        "CREATE INDEX IF NOT EXISTS idx_tx_address_ts_sig "
+        "ON transactions(address, timestamp DESC, signature DESC)"
+    ),
+    "idx_tx_recipient_ts_sig": (
+        "CREATE INDEX IF NOT EXISTS idx_tx_recipient_ts_sig "
+        "ON transactions(recipient, timestamp DESC, signature DESC)"
+    ),
+    "idx_tx_address": (
+        "CREATE INDEX IF NOT EXISTS idx_tx_address "
+        "ON transactions(address)"
+    ),
+    "idx_tx_recipient": (
+        "CREATE INDEX IF NOT EXISTS idx_tx_recipient "
+        "ON transactions(recipient)"
+    ),
+    "idx_tx_signature": (
+        "CREATE INDEX IF NOT EXISTS idx_tx_signature "
+        "ON transactions(signature)"
+    ),
+}
+
+_indexes_initialized = False
+_indexes_lock = Lock()
+
+def ensure_explorer_indexes():
+    global _indexes_initialized
+    if _indexes_initialized:
+        return
+    with _indexes_lock:
+        if _indexes_initialized:
+            return
+        try:
+            db_paths = [bis_root]
+            if os.path.isfile(hyper_root) and hyper_root not in db_paths:
+                db_paths.append(hyper_root)
+            for db_path in db_paths:
+                conn = sqlite3.connect(db_path)
+                c = conn.cursor()
+                for sql in _EXPLORER_INDEXES.values():
+                    c.execute(sql)
+                conn.commit()
+                c.close()
+                conn.close()
+            _indexes_initialized = True
+            app_log.info("Explorer indexes ready.")
+        except Exception as e:
+            app_log.warning(f"Explorer index setup failed: {str(e)}")
 try:
     app_secret = config.get('My Explorer', 'secret')
 except:
@@ -132,6 +195,26 @@ dev_address = "4edadac9093d9326ee4b17f869b14f1a2534f96f9c5d7b48dc9acaed"
 vip_mess = ""
 do_cmc_once = False
 
+_json_cache = {}
+_demo_home_cache = {"ts": 0.0, "data": None}
+_DEMO_HOME_TTL_SECONDS = 3.0
+
+def _read_json_file_cached(path, fallback=None):
+    try:
+        mtime = os.path.getmtime(path)
+    except:
+        return fallback
+    cached = _json_cache.get(path)
+    if cached and cached["mtime"] == mtime:
+        return cached["data"]
+    try:
+        with open(path) as json_file:
+            data = json.load(json_file)
+        _json_cache[path] = {"mtime": mtime, "data": data}
+        return data
+    except:
+        return fallback
+
 app_log.info("Config and logging done")
 
 # Read config
@@ -156,10 +239,57 @@ app_log.info("Async mode is: {}".format(async_mode))
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = app_secret
+
+SLOW_REQUEST_MS = 500
+SLOW_CALL_MS = 300
+
+def timed_call(name, func, *args, **kwargs):
+    t0 = time.time()
+    result = func(*args, **kwargs)
+    dt_ms = (time.time() - t0) * 1000.0
+    if dt_ms >= SLOW_CALL_MS:
+        app_log.warning("slow call %dms %s", int(dt_ms), name)
+    return result
+
+def slowlog_middleware(wsgi_app, threshold_ms, log):
+    def _app(environ, start_response):
+        t0 = time.time()
+        status_holder = {"status": "0"}
+
+        def _start_response(status, headers, exc_info=None):
+            status_holder["status"] = status.split(" ", 1)[0]
+            return start_response(status, headers, exc_info)
+
+        try:
+            return wsgi_app(environ, _start_response)
+        finally:
+            dt_ms = (time.time() - t0) * 1000.0
+            if dt_ms >= threshold_ms:
+                method = environ.get("REQUEST_METHOD", "")
+                path = environ.get("PATH_INFO", "")
+                qs = environ.get("QUERY_STRING", "")
+                status = status_holder["status"]
+                log.warning(
+                    "slow request %dms %s %s%s %s",
+                    int(dt_ms),
+                    method,
+                    path,
+                    ("?" + qs) if qs else "",
+                    status,
+                )
+    return _app
+
+app.wsgi_app = slowlog_middleware(app.wsgi_app, SLOW_REQUEST_MS, app_log)
 socketio = SocketIO(app, async_mode=async_mode, logger=True, engineio_logger=True)
 thread = None
 cmc_thread = None
 thread_lock = Lock()
+
+@app.before_first_request
+def _init_explorer_indexes():
+    # Index creation is handled by explorer_indexes_create.py to avoid
+    # blocking startup on large databases.
+    return
 
 db_hyper = False
 
@@ -210,7 +340,7 @@ def get_50():
         sig_html = format_alias_entry(r_sig, None, r_sig_d)
 
         tx_time = time.strftime("%H:%M:%S, %d/%m/%Y", time.gmtime(float(r[1])))
-        block_link = f"<a href='search?quicksearch={r[0]}'>{r[0]}</a>" if r[0] >= 0 else str(r[0])
+        block_link = f"<a href='/block/{r[0]}'>{r[0]}</a>" if r[0] >= 0 else str(r[0])
 
         row = (
             f"<tr><th scope='row'>{block_link}</th>"
@@ -230,15 +360,17 @@ def get_50():
 
 def cmc_alt(message):
 
-    with open('dump_cmc.txt') as json_file:
-        x = json.load(json_file)
+    x = _read_json_file_cached('dump_cmc.txt', fallback=None)
+    if x:
         socketio.emit('my_info',{'btc': x['btc'], 'usd': x['usd'], 'fiat': x['fiat'], 'toc': x['toc'], 'mess': message},namespace='/test')
 
-    try:
-        with open('price_info.txt') as json_file:
-            cmc_vals = json.load(json_file)
-            app_log.info("price_info.txt has been read")
-    except:
+    cmc_vals = _read_json_file_cached(
+        'price_info.txt',
+        fallback={"BTC": 0.001e-05, "USD": 0.01, "EUR": 0.01, "GBP": 0.01, "CNY": 0.01, "AUD": 0.01}
+    )
+    if cmc_vals:
+        app_log.info("price_info.txt has been read")
+    else:
         cmc_vals = {"BTC": 0.001e-05, "USD": 0.01, "EUR": 0.01, "GBP": 0.01, "CNY": 0.01, "AUD": 0.01}
         app_log.error("price_info.txt has an issue or is missing")
         
@@ -368,19 +500,21 @@ def get_message_info():
     except requests.exceptions.RequestException as e:
         app_log.error("Message Thread: Error {}".format(e))
 
-    with open('message.txt') as json_file:
-        m = json.load(json_file)
-        my_code = m['secret']
-        
+    m = _read_json_file_cached('message.txt', fallback=None)
+    if m:
+        my_code = m.get('secret')
         if my_code == app_secret:
             if n_ann:
                 this_message = c_toast
             else:
-                this_message = m['message']
+                this_message = m.get('message', "")
             app_log.info("Message Checked: Code Good")
         else:
             this_message = ""
             app_log.error("Message Checked: Code Bad")
+    else:
+        this_message = ""
+        app_log.error("Message Checked: Missing or invalid message.txt")
     
     if dev_state:
         this_message = "DEV MODE | {}".format(this_message)
@@ -497,11 +631,11 @@ def main_info():
             continue
 
     
-def rich_html(a,c):
+def rich_html(a, c, start_rank=1):
 
     send_back = ""
     
-    i = 1
+    i = start_rank
     
     for r in a:
         amt = "{:.8f}".format(r[1])
@@ -517,8 +651,8 @@ def rich_html(a,c):
         
         send_back = send_back + '<tr><th scope="row"> {} </th>\n'.format(rank)
         # send_back = send_back + '<td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(address,alias,bal_bis,bal_curr)
-        send_back = send_back + '<td><span data-toggle="tooltip" title="{} : Left Click to Copy" onclick="copyToClipboard(&quot;{}&quot;)">{}</span></td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(address,address,address_d,alias,bal_bis,bal_curr)
-        i +=1
+        send_back = send_back + '<td><a href="/address/{}"><span onclick="copyToClipboard(&quot;{}&quot;)">{}</span></a></td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(address, address, address_d, alias, bal_bis, bal_curr)
+        i += 1
 
     return send_back
 
@@ -578,6 +712,93 @@ def fetch_by_height(conn, height):
     c.execute("SELECT * FROM transactions WHERE block_height = ?;", (height,))
     return c.fetchall()
 
+def fetch_block_first_row(conn, height):
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT block_height, timestamp, address, recipient, amount, signature, block_hash
+        FROM transactions
+        WHERE block_height = ?
+        ORDER BY timestamp DESC, signature DESC
+        LIMIT 1;
+        """,
+        (height,)
+    )
+    return c.fetchone()
+
+def fetch_block_transactions_paginated(conn, height, limit=20, before_ts=None, before_sig=None):
+    c = conn.cursor()
+    if before_ts is None:
+        c.execute(
+            """
+            SELECT block_height, timestamp, address, recipient, amount, signature
+            FROM transactions
+            WHERE block_height = ?
+            ORDER BY timestamp DESC, signature DESC
+            LIMIT ?;
+            """,
+            (height, limit + 1)
+        )
+    else:
+        c.execute(
+            """
+            SELECT block_height, timestamp, address, recipient, amount, signature
+            FROM transactions
+            WHERE block_height = ?
+              AND (timestamp < ? OR (timestamp = ? AND signature < ?))
+            ORDER BY timestamp DESC, signature DESC
+            LIMIT ?;
+            """,
+            (height, before_ts, before_ts, before_sig, limit + 1)
+        )
+    return c.fetchall()
+
+def fetch_block_reward_summary(conn, height):
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT block_height, timestamp, address, recipient, reward, signature, block_hash, fee, operation, openfield
+        FROM transactions
+        WHERE block_height = ? AND reward != 0
+        LIMIT 1;
+        """,
+        (height,)
+    )
+    return c.fetchone()
+
+def fetch_block_tx_count(conn, height):
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM transactions WHERE block_height = ?;", (height,))
+    row = c.fetchone()
+    return int(row[0]) if row else 0
+
+def fetch_address_transactions(conn, address, limit=20, before_ts=None, before_sig=None):
+    c = conn.cursor()
+    if before_ts is None:
+        c.execute(
+            """
+            SELECT block_height, timestamp, address, recipient, amount, signature
+            FROM transactions
+            WHERE address = ? OR recipient = ?
+            ORDER BY timestamp DESC, signature DESC
+            LIMIT ?;
+            """,
+            (address, address, limit + 1)
+        )
+    else:
+        c.execute(
+            """
+            SELECT block_height, timestamp, address, recipient, amount, signature
+            FROM transactions
+            WHERE (address = ? OR recipient = ?)
+              AND (timestamp < ? OR (timestamp = ? AND signature < ?))
+            ORDER BY timestamp DESC, signature DESC
+            LIMIT ?;
+            """,
+            (address, address, before_ts, before_ts, before_sig, limit + 1)
+        )
+    return c.fetchall()
+
 def build_info_html(block, alias, data):
     qr_path = f'static/qr_{block}.png'
     return f"""
@@ -612,11 +833,11 @@ def render_transaction_table(all_rows, display_limit):
         txid_short = f"{x[5][:5]}....{x[5][-5:]}"
         from_d = f"{x[2][:5]}....{x[2][-5:]}"
         to_d = f"{x[3][:5]}....{x[3][-5:]}"
-        det_str = x[5][:56].replace("+", "%2B").replace("<", "&lt;").replace(">", "&gt;")
-        det_link = f"/details?mydetail={det_str}&myaddress={x[2]}"
+        det_str = toolsp.txid_to_base58(x[5][:56])
+        det_link = f"/tx/{det_str}"
         rows_html += f"""
         <tr>
-            <td><a href='search?quicksearch={x[0]}'>{x[0]}</a></td>
+            <td><a href='/block/{x[0]}'>{x[0]}</a></td>
             <td>{time.strftime("%Y/%m/%d,%H:%M:%S", time.gmtime(float(x[1])))}</td>
             <td><a href='search?quicksearch={x[2]}'>{from_d}</a></td>
             <td><a href='search?quicksearch={x[3]}'>{to_d}</a></td>
@@ -639,6 +860,326 @@ def render_transaction_table(all_rows, display_limit):
     """
     heading = "<center><h4>Transaction List</h4></center>" if display_limit == 0 else f"<center><h4>Transaction List</h4><small>({display_limit} tx limit)</small></center>"
     return f"{heading}{header}{rows_html}</table>"
+
+def render_demo_home_lists(tx_view, block_view, show_miner_label=False):
+    tx_items = []
+    for tx in tx_view:
+        txid_short = f"{tx['txid'][:6]}...{tx['txid'][-6:]}"
+        from_short = f"{tx['from'][:6]}...{tx['from'][-6:]}"
+        to_short = f"{tx['to'][:6]}...{tx['to'][-6:]}"
+        block = tx.get('block')
+        block_html = ""
+        if block is not None:
+            block_html = f" &nbsp;Block: <a href=\"/block/{block}\">{block}</a>"
+        tx_items.append(
+            "<li class=\"demo-item\">"
+            "<div class=\"demo-left\">"
+            "<div class=\"demo-icon\">↔</div>"
+            "<div>"
+            f"<div class=\"demo-primary\"><span class=\"demo-txid-label\">Txid:</span> <a href=\"/tx/{tx['txid_url']}\">{txid_short}</a></div>"
+            f"<div class=\"demo-secondary\">From: <a href=\"/search?quicksearch={tx['from']}\">{from_short}</a> &nbsp;To: <a href=\"/search?quicksearch={tx['to']}\">{to_short}</a>{block_html}</div>"
+            "</div></div>"
+            "<div class=\"demo-meta\">"
+            f"<div class=\"demo-meta-strong\">{tx['amount']:.8f} BIS</div>"
+            f"<div>{tx['timestamp']}</div>"
+            "</div></li>"
+        )
+
+    block_items = []
+    for b in block_view:
+        txid_short = f"{b['txid'][:6]}...{b['txid'][-6:]}"
+        miner = b.get('recipient', '')
+        miner_short = f"{miner[:6]}...{miner[-6:]}" if miner else ""
+        if miner:
+            if show_miner_label:
+                miner_label = "<span class=\"demo-miner-label\">Miner:</span> "
+            else:
+                miner_label = ""
+            miner_html = f" &nbsp; {miner_label}<a href=\"/search?quicksearch={miner}\">{miner_short}</a>"
+        else:
+            miner_html = ""
+        block_items.append(
+            "<li class=\"demo-item\">"
+            "<div class=\"demo-left\">"
+            "<div>"
+            f"<div class=\"demo-primary\"><a href=\"/block/{b['height']}\">#{b['height']}</a>{miner_html}</div>"
+            f"<div class=\"demo-secondary\">{b['tx_count']} Transactions &nbsp;|&nbsp; Txid: <a href=\"/tx/{b['txid_url']}\">{txid_short}</a></div>"
+            "</div></div>"
+            "<div class=\"demo-meta\">"
+            f"<div class=\"demo-meta-strong\">{b['reward']:.8f} BIS</div>"
+            f"<div>{b['timestamp']}</div>"
+            "</div></li>"
+        )
+
+    tx_html = "\n".join(tx_items) if tx_items else "<li class=\"demo-item\">No transactions found.</li>"
+    block_html = "\n".join(block_items) if block_items else "<li class=\"demo-item\">No blocks found.</li>"
+    return tx_html, block_html
+
+def render_address_transactions_list(tx_view, address):
+    tx_items = []
+    for tx in tx_view:
+        is_incoming = str(tx.get("to", "")).lower() == str(address).lower()
+        tone_class = "demo-positive" if is_incoming else "demo-negative"
+        txid_short = f"{tx['txid'][:6]}...{tx['txid'][-6:]}"
+        from_short = f"{tx['from'][:6]}...{tx['from'][-6:]}"
+        to_short = f"{tx['to'][:6]}...{tx['to'][-6:]}"
+        block = tx.get('block')
+        block_html = ""
+        if block is not None:
+            block_html = f" &nbsp;Block: <a href=\"/block/{block}\">{block}</a>"
+        tx_items.append(
+            "<li class=\"demo-item\">"
+            "<div class=\"demo-left\">"
+            f"<div class=\"demo-icon {tone_class}\">↔</div>"
+            "<div>"
+            f"<div class=\"demo-primary\"><span class=\"demo-txid-label\">Txid:</span> <a href=\"/tx/{tx['txid_url']}\">{txid_short}</a></div>"
+            f"<div class=\"demo-secondary\">From: <a href=\"/search?quicksearch={tx['from']}\">{from_short}</a> &nbsp;To: <a href=\"/search?quicksearch={tx['to']}\">{to_short}</a>{block_html}</div>"
+            "</div></div>"
+            "<div class=\"demo-meta\">"
+            f"<div class=\"demo-meta-strong\"><span class=\"demo-amount {tone_class}\">{tx['amount']:.8f}</span> <span class=\"demo-amount-unit\">BIS</span></div>"
+            f"<div>{tx['timestamp']}</div>"
+            "</div></li>"
+        )
+    return "\n".join(tx_items) if tx_items else "<li class=\"demo-item\">No transactions found.</li>"
+
+def render_token_transactions_list(tx_view, token_name):
+    tx_items = []
+    for tx in tx_view:
+        txid_short = f"{tx['txid'][:6]}...{tx['txid'][-6:]}"
+        from_short = f"{tx['from'][:6]}...{tx['from'][-6:]}"
+        to_short = f"{tx['to'][:6]}...{tx['to'][-6:]}"
+        block = tx.get('block')
+        block_html = ""
+        if block is not None:
+            block_html = f" &nbsp;Block: <a href=\"/block/{block}\">{block}</a>"
+        amount_value = tx.get("amount", 0)
+        try:
+            amount_display = str(int(float(amount_value)))
+        except:
+            amount_display = str(amount_value)
+        tx_items.append(
+            "<li class=\"demo-item\">"
+            "<div class=\"demo-left\">"
+            "<div class=\"demo-icon\">↔</div>"
+            "<div>"
+            f"<div class=\"demo-primary\"><span class=\"demo-txid-label\">Txid:</span> <a href=\"/tx/{tx['txid_url']}\">{txid_short}</a></div>"
+            f"<div class=\"demo-secondary\">From: <a href=\"/search?quicksearch={tx['from']}\">{from_short}</a> &nbsp;To: <a href=\"/search?quicksearch={tx['to']}\">{to_short}</a>{block_html}</div>"
+            "</div></div>"
+            "<div class=\"demo-meta\">"
+            f"<div class=\"demo-meta-strong\">{amount_display} {token_name}</div>"
+            f"<div>{tx['timestamp']}</div>"
+            "</div></li>"
+        )
+    return "\n".join(tx_items) if tx_items else "<li class=\"demo-item\">No transactions found.</li>"
+
+def fetch_token_issue_row(conn, token_name):
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT block_height, timestamp, token, address, recipient, txid, amount
+        FROM tokens
+        WHERE token = ? AND address = 'issued'
+        ORDER BY block_height DESC
+        LIMIT 1;
+        """,
+        (token_name,)
+    )
+    row = c.fetchone()
+    if row:
+        return row
+    c.execute(
+        """
+        SELECT block_height, timestamp, token, address, recipient, txid, amount
+        FROM tokens
+        WHERE token = ?
+        ORDER BY block_height DESC
+        LIMIT 1;
+        """,
+        (token_name,)
+    )
+    return c.fetchone()
+
+def fetch_token_tx_count(conn, token_name, exclude_issue=True):
+    c = conn.cursor()
+    if exclude_issue:
+        c.execute(
+            """
+            SELECT COUNT(*)
+            FROM tokens
+            WHERE token = ? AND address != 'issued';
+            """,
+            (token_name,)
+        )
+    else:
+        c.execute(
+            """
+            SELECT COUNT(*)
+            FROM tokens
+            WHERE token = ?;
+            """,
+            (token_name,)
+        )
+    row = c.fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
+
+def fetch_token_transactions(conn, token_name, limit=20, before_block=None, before_ts=None, before_txid=None, exclude_issue=True):
+    c = conn.cursor()
+    base_where = "token = ?"
+    params = [token_name]
+    if exclude_issue:
+        base_where += " AND address != 'issued'"
+    if before_block is None:
+        c.execute(
+            f"""
+            SELECT block_height, timestamp, address, recipient, amount, txid
+            FROM tokens
+            WHERE {base_where}
+            ORDER BY block_height DESC, timestamp DESC, txid DESC
+            LIMIT ?;
+            """,
+            (*params, limit + 1)
+        )
+    else:
+        c.execute(
+            f"""
+            SELECT block_height, timestamp, address, recipient, amount, txid
+            FROM tokens
+            WHERE {base_where}
+              AND (block_height < ?
+                   OR (block_height = ? AND (timestamp < ? OR (timestamp = ? AND txid < ?))))
+            ORDER BY block_height DESC, timestamp DESC, txid DESC
+            LIMIT ?;
+            """,
+            (*params, before_block, before_block, before_ts, before_ts, before_txid, limit + 1)
+        )
+    return c.fetchall()
+
+def fetch_demo_home_data(limit=10):
+    cached = _demo_home_cache["data"]
+    if cached and (time.time() - _demo_home_cache["ts"] <= _DEMO_HOME_TTL_SECONDS):
+        return cached
+
+    tx_rows = []
+    block_rows = []
+
+    try:
+        conn = sqlite3.connect(bis_root)
+        conn.text_factory = str
+        c = conn.cursor()
+
+        c.execute("""
+            SELECT timestamp, address, recipient, amount, signature
+            FROM transactions
+            WHERE reward = 0
+            ORDER BY timestamp DESC
+            LIMIT ?;
+        """, (limit,))
+        tx_rows = c.fetchall()
+
+        c.execute("""
+            SELECT block_height, timestamp, reward, signature, recipient
+            FROM transactions
+            WHERE reward != 0
+            ORDER BY block_height DESC
+            LIMIT ?;
+        """, (limit,))
+        block_rows = c.fetchall()
+
+        heights = [row[0] for row in block_rows]
+        if heights:
+            placeholders = ",".join("?" for _ in heights)
+            c.execute(
+                f"SELECT block_height, COUNT(*) FROM transactions WHERE block_height IN ({placeholders}) GROUP BY block_height;",
+                heights
+            )
+            count_map = {row[0]: row[1] for row in c.fetchall()}
+        else:
+            count_map = {}
+
+        c.close()
+        conn.close()
+    except Exception as e:
+        app_log.error(f"demo_home data error: {str(e)}")
+
+    result = (tx_rows, [(b[0], b[1], b[2], b[3], b[4], count_map.get(b[0], 0)) for b in block_rows])
+    _demo_home_cache["data"] = result
+    _demo_home_cache["ts"] = time.time()
+    return result
+
+def fetch_demo_transactions(limit=20, before_ts=None, before_sig=None):
+    rows = []
+    try:
+        conn = sqlite3.connect(bis_root)
+        conn.text_factory = str
+        c = conn.cursor()
+        if before_ts is None:
+            c.execute("""
+                SELECT block_height, timestamp, address, recipient, amount, signature
+                FROM transactions
+                WHERE reward = 0
+                ORDER BY timestamp DESC, signature DESC
+                LIMIT ?;
+            """, (limit + 1,))
+        else:
+            c.execute("""
+                SELECT block_height, timestamp, address, recipient, amount, signature
+                FROM transactions
+                WHERE reward = 0 AND (
+                    timestamp < ? OR (timestamp = ? AND signature < ?)
+                )
+                ORDER BY timestamp DESC, signature DESC
+                LIMIT ?;
+            """, (before_ts, before_ts, before_sig, limit + 1))
+        rows = c.fetchall()
+        c.close()
+        conn.close()
+    except Exception as e:
+        app_log.error(f"transactions page data error: {str(e)}")
+    return rows
+
+def fetch_demo_blocks(limit=20, before_height=None):
+    rows = []
+    try:
+        conn = sqlite3.connect(bis_root)
+        conn.text_factory = str
+        c = conn.cursor()
+        if before_height is None:
+            c.execute("""
+                SELECT block_height, timestamp, reward, signature, recipient
+                FROM transactions
+                WHERE reward != 0
+                ORDER BY block_height DESC
+                LIMIT ?;
+            """, (limit + 1,))
+        else:
+            c.execute("""
+                SELECT block_height, timestamp, reward, signature, recipient
+                FROM transactions
+                WHERE reward != 0 AND block_height < ?
+                ORDER BY block_height DESC
+                LIMIT ?;
+            """, (before_height, limit + 1))
+        rows = c.fetchall()
+
+        heights = [row[0] for row in rows]
+        if heights:
+            placeholders = ",".join("?" for _ in heights)
+            c.execute(
+                f"SELECT block_height, COUNT(*) FROM transactions WHERE block_height IN ({placeholders}) GROUP BY block_height;",
+                heights
+            )
+            count_map = {row[0]: row[1] for row in c.fetchall()}
+        else:
+            count_map = {}
+
+        c.close()
+        conn.close()
+    except Exception as e:
+        app_log.error(f"blocks page data error: {str(e)}")
+        count_map = {}
+
+    rows = [(b[0], b[1], b[2], b[3], b[4], count_map.get(b[0], 0)) for b in rows]
+    return rows
         
 #//////////////////
 
@@ -650,8 +1191,8 @@ def render_transaction_table(all_rows, display_limit):
     #return r
 # end robots.txt
 
-@app.route('/')
-def index():
+@app.route('/txs')
+def txs_index():
     return render_template('index.html')
 
     
@@ -676,6 +1217,7 @@ def ledger_query():
     xdate = request.form.get('sdate')
     ydate = request.form.get('fdate')
     f_addy = (request.form.get('extra') or "0").strip()
+    block_input = toolsp.normalize_txid_input(block_input)
 
     # Dates
     mylatest = toolsp.latest()
@@ -771,6 +1313,15 @@ def richest_form():
 
     #print(cmc_vals)
     
+    limit = 20
+    offset = 0
+    before = request.args.get('before', '').strip()
+    if before:
+        try:
+            offset = max(int(before), 0)
+        except:
+            offset = 0
+
     try:
         def_curr = request.form.get('my_curr')
     except:
@@ -787,11 +1338,23 @@ def richest_form():
             
     all = sorted(all, key=lambda address: address[1], reverse=True)
     
-    view = rich_html(all,conv_curr)
+    total_addresses = len(all)
+    page_rows = all[offset:offset + limit]
+    view = rich_html(page_rows, conv_curr, start_rank=offset + 1)
     
     #print(all[0])
     
-    return render_template('richlist.html', bislim=str(bis_limit), defcurr=def_curr, richest=view)
+    has_next = (offset + limit) < total_addresses
+    return render_template(
+        'richlist.html',
+        bislim=str(bis_limit),
+        defcurr=def_curr,
+        richest=view,
+        total_addresses=total_addresses,
+        has_next=has_next,
+        has_before=(offset > 0),
+        next_cursor=str(offset + limit)
+    )
 
 @app.route('/toplist', methods=['GET', 'POST'])
 def toplist_form():
@@ -849,6 +1412,15 @@ def test_richest_form():
 @app.route('/minerquery', methods=['GET'])
 def minerquery():
 
+    limit = 20
+    offset = 0
+    before = request.args.get('before', '').strip()
+    if before:
+        try:
+            offset = max(int(before), 0)
+        except:
+            offset = 0
+
     try:
         getaddress = request.args.get('myaddy') or ""
     except:
@@ -875,24 +1447,37 @@ def minerquery():
         addressis = addressis + "</table>"
         
     all = toolsp.miners()
+    miners = [x for x in all if len(str(x[0])) == 56]
+    total_miners = len(miners)
+    page_rows = miners[offset:offset + limit]
 
     send_back = ""
 
-    j = 1
-    for x in all:
+    j = offset + 1
+    for x in page_rows:
         thisminer = str(x[0])
         
         if len(thisminer) == 56:
             send_back = send_back + "<tr><th scope='row'> {} </th>\n".format(str(j))
+            address_d = "{}....{}".format(thisminer[:5], thisminer[-5:])
             if len(str(x[5])) > 0:
                 send_back = send_back + "<td><a href='/minerquery?myaddy={}'>{}</a></td>".format(thisminer,str(x[5]))
             else:
-                send_back = send_back + "<td><a href='/minerquery?myaddy={}'>{}</a></td>".format(thisminer,thisminer)
+                send_back = send_back + "<td><a href='/minerquery?myaddy={}'>{}</a></td>".format(thisminer, address_d)
             send_back = send_back + "<td>{}</td>".format(str(x[3]))
             send_back = send_back + "</tr>"
-            j = j+1
-    
-    return render_template('minerquery.html', miners=send_back, details=addressis)
+            j = j + 1
+
+    has_next = (offset + limit) < total_miners
+    return render_template(
+        'minerquery.html',
+        miners=send_back,
+        details=addressis,
+        has_next=has_next,
+        has_before=(offset > 0),
+        next_cursor=str(offset + limit),
+        myaddy=getaddress or ""
+    )
 
 
 @app.route('/wservers', methods=['GET'])
@@ -1054,24 +1639,17 @@ def url_gen():
     return render_template('bisurl.html', starter=starter, my_add=my_add, my_amount=my_amount, my_op=my_op, my_mess=my_mess)
 
 
-@app.route('/details')
-def detailinfo():
+def _render_detail_view(getdetail, get_addy=None):
 
-    try:
-        getdetail = request.args.get('mydetail')
-    except:
-        getdetail = None
-    try:
-        get_addy = request.args.get('myaddress')
-    except:
-        get_addy = None
-        
-    if toolsp.s_test(get_addy) == False:
+    if not get_addy or toolsp.s_test(get_addy) == False:
         get_addy = None
 
+    getdetail = toolsp.normalize_txid_input(getdetail)
     if toolsp.d_test(getdetail) == False:
         getdetail = None
         
+    block_confirmations = None
+
     if getdetail:
     
         m_detail = toolsp.get_the_details(getdetail,get_addy)
@@ -1080,6 +1658,7 @@ def detailinfo():
         if m_detail:
         
             d_block = str(m_detail[0])
+            block_confirmations = d_block
             d_time = str(time.strftime("%H:%M:%S, %d/%m/%Y", time.gmtime(float(m_detail[1]))))
             #d_time = str(m_detail[1])
             d_from = str(m_detail[2])
@@ -1093,10 +1672,26 @@ def detailinfo():
             d_reward = str(m_detail[9])
             d_operation = str(m_detail[10][:30])
             d_open = str(m_detail[11][:1000])
+
+            try:
+                latest_height = int(toolsp.latest()[0])
+                block_height = int(m_detail[0])
+                if latest_height >= block_height:
+                    conf_count = latest_height - block_height + 1
+                    if conf_count < 1:
+                        conf_count = 1
+                    if conf_count == 1:
+                        conf_label = "1 Block Confirmation"
+                    else:
+                        conf_label = f"{conf_count} Block Confirmations"
+                    block_confirmations = f"{block_height} ({conf_label})"
+            except Exception:
+                block_confirmations = d_block
             
         else:
             
             d_block = "Not Found"
+            block_confirmations = d_block
             d_time = ""
             d_from = ""
             d_to = ""
@@ -1126,7 +1721,47 @@ def detailinfo():
         d_operation = ""
         d_open = ""
         
-    return render_template('detail.html', ablock=d_block, atime=d_time, afrom=d_from, ato=d_to, aamount=d_amount, asig=d_sig, atxid=d_txid, apub=d_pub, ahash=d_hash, afee=d_fee, areward=d_reward, aoperation=d_operation, aopen=d_open)
+    return render_template(
+        'detail.html',
+        ablock=block_confirmations if block_confirmations else d_block,
+        atime=d_time,
+        afrom=d_from,
+        ato=d_to,
+        aamount=d_amount,
+        asig=d_sig,
+        atxid=d_txid,
+        atxref=toolsp.txid_to_base58(d_txid) if d_txid else "",
+        apub=d_pub,
+        ahash=d_hash,
+        afee=d_fee,
+        areward=d_reward,
+        aoperation=d_operation,
+        aopen=d_open
+    )
+
+@app.route('/details')
+def detailinfo():
+
+    try:
+        getdetail = request.args.get('mydetail')
+    except:
+        getdetail = None
+    try:
+        get_addy = request.args.get('myaddress')
+    except:
+        get_addy = None
+
+    return _render_detail_view(getdetail, get_addy)
+
+
+@app.route('/tx/<txid>')
+def detailinfo_tx(txid):
+    # Optional fallback: allow ?myaddress= for db_hyper lookup
+    try:
+        get_addy = request.args.get('myaddress')
+    except:
+        get_addy = None
+    return _render_detail_view(txid, get_addy)
 
 
 @app.route('/apihelp')
@@ -1138,6 +1773,185 @@ def apihelp():
         a_text = " ({} record limit)".format(str(mydisplay))
     
     return render_template('apihelp.html', atext=a_text)
+
+@app.route('/')
+def home():
+    tx_rows, block_rows = fetch_demo_home_data(limit=10)
+
+    tx_view = []
+    for ts, addr_from, addr_to, amount, txid in tx_rows:
+        tx_view.append({
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "from": addr_from,
+            "to": addr_to,
+            "amount": float(amount),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56])
+        })
+
+    block_view = []
+    for height, ts, reward, txid, recipient, tx_count in block_rows:
+        block_view.append({
+            "height": height,
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "tx_count": int(tx_count),
+            "reward": float(reward),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56]),
+            "recipient": recipient
+        })
+
+    tx_html, block_html = render_demo_home_lists(tx_view, block_view, show_miner_label=True)
+    return render_template('home.html', tx_rows=tx_view, block_rows=block_view, tx_html=tx_html, block_html=block_html)
+
+@app.route('/home_data')
+def home_data():
+    tx_rows, block_rows = fetch_demo_home_data(limit=10)
+
+    tx_view = []
+    for ts, addr_from, addr_to, amount, txid in tx_rows:
+        tx_view.append({
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "from": addr_from,
+            "to": addr_to,
+            "amount": float(amount),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56])
+        })
+
+    block_view = []
+    for height, ts, reward, txid, recipient, tx_count in block_rows:
+        block_view.append({
+            "height": height,
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "tx_count": int(tx_count),
+            "reward": float(reward),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56]),
+            "recipient": recipient
+        })
+
+    tx_html, block_html = render_demo_home_lists(tx_view, block_view, show_miner_label=True)
+    return jsonify({"tx_html": tx_html, "block_html": block_html})
+
+@app.route('/transactions_data')
+def transactions_data():
+    limit = 20
+    rows = fetch_demo_transactions(limit=limit)
+    rows = rows[:limit]
+    tx_view = []
+    for height, ts, addr_from, addr_to, amount, txid in rows:
+        tx_view.append({
+            "block": height,
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "from": addr_from,
+            "to": addr_to,
+            "amount": float(amount),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56])
+        })
+    tx_html, _ = render_demo_home_lists(tx_view, [], show_miner_label=False)
+    return jsonify({"tx_html": tx_html})
+
+@app.route('/blocks_data')
+def blocks_data():
+    limit = 20
+    rows = fetch_demo_blocks(limit=limit)
+    rows = rows[:limit]
+    block_view = []
+    for height, ts, reward, txid, recipient, tx_count in rows:
+        block_view.append({
+            "height": height,
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "tx_count": int(tx_count),
+            "reward": float(reward),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56]),
+            "recipient": recipient
+        })
+    _, block_html = render_demo_home_lists([], block_view, show_miner_label=True)
+    return jsonify({"block_html": block_html})
+
+@app.route('/transactions')
+def demo_transactions():
+    limit = 20
+    before = request.args.get('before', '').strip()
+    before_ts = None
+    before_sig = None
+    if before and "|" in before:
+        parts = before.split("|", 1)
+        try:
+            before_ts = float(parts[0])
+            before_sig = parts[1]
+        except:
+            before_ts = None
+            before_sig = None
+
+    rows = fetch_demo_transactions(limit=limit, before_ts=before_ts, before_sig=before_sig)
+    has_next = len(rows) > limit
+    rows = rows[:limit]
+    tx_view = []
+    for height, ts, addr_from, addr_to, amount, txid in rows:
+        tx_view.append({
+            "block": height,
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "from": addr_from,
+            "to": addr_to,
+            "amount": float(amount),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56])
+        })
+
+    tx_html, _ = render_demo_home_lists(tx_view, [], show_miner_label=False)
+    next_cursor = ""
+    if has_next and rows:
+        _, last_ts, _, _, _, last_sig = rows[-1]
+        next_cursor = f"{last_ts}|{last_sig}"
+    return render_template(
+        'transactions.html',
+        tx_html=tx_html,
+        has_next=has_next,
+        next_cursor=next_cursor,
+        has_before=bool(before)
+    )
+
+@app.route('/blocks')
+def demo_blocks():
+    limit = 20
+    before = request.args.get('before', '').strip()
+    before_height = None
+    if before:
+        try:
+            before_height = int(before)
+        except:
+            before_height = None
+
+    rows = fetch_demo_blocks(limit=limit, before_height=before_height)
+    has_next = len(rows) > limit
+    rows = rows[:limit]
+    block_view = []
+    for height, ts, reward, txid, recipient, tx_count in rows:
+        block_view.append({
+            "height": height,
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "tx_count": int(tx_count),
+            "reward": float(reward),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56]),
+            "recipient": recipient
+        })
+
+    _, block_html = render_demo_home_lists([], block_view, show_miner_label=True)
+    next_cursor = ""
+    if has_next and rows:
+        next_cursor = str(rows[-1][0])
+    return render_template(
+        'blocks.html',
+        block_html=block_html,
+        has_next=has_next,
+        next_cursor=next_cursor,
+        has_before=bool(before)
+    )
 
     
 @app.route('/tokens')
@@ -1157,7 +1971,7 @@ def tokens():
 
         tview.append('<tr>')
 
-        tview.append("<td><b><a href='/tokenquery?token={}'>{}</a><b></td>".format(str(t[2]),str(t[2])))
+        tview.append("<td><b><a href='/token/{}'>{}</a><b></td>".format(str(t[2]),str(t[2])))
         #tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(t[4]),str(t[4])))
         tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(token_address_tx),str(token_address_tx_d)))
         tview.append('<td>{}</td>'.format(str(t[6])))
@@ -1187,70 +2001,114 @@ def tokens():
     return render_template('tokens.html', starter=starter)
 
 
+def tokenquery_impl(token_name):
+
+    if not token_name:
+        return render_template('tokenquery.html', token_name="", details=None, tx_html="", tx_count=0, has_next=False, next_cursor="", has_before=False, error="Token not found.")
+
+    before = request.args.get('before', '').strip()
+    if before:
+        before = before.replace(" ", "+")
+    before_block = None
+    before_ts = None
+    before_txid = None
+    if before and "|" in before:
+        parts = before.split("|")
+        if len(parts) >= 3:
+            try:
+                before_block = int(parts[0])
+                before_ts = float(parts[1])
+                before_txid = parts[2]
+            except:
+                before_block = None
+                before_ts = None
+                before_txid = None
+
+    details = None
+    tx_html = ""
+    tx_count = 0
+    has_next = False
+    next_cursor = ""
+
+    try:
+        with sqlite3.connect(f"{db_root}index.db") as conn:
+            issue_row = fetch_token_issue_row(conn, token_name)
+            if issue_row:
+                block_height, ts, token, address, recipient, txid, amount = issue_row
+                txid_short = txid[:56] if txid else ""
+                details = {
+                    "token": token,
+                    "quantity": amount,
+                    "issued_by": recipient,
+                    "issue_block": block_height,
+                    "txid": txid_short,
+                    "txref": toolsp.txid_to_base58(txid_short) if txid_short else "",
+                    "timestamp": time.strftime("%H:%M:%S, %d/%m/%Y", time.gmtime(float(ts))) if ts else ""
+                }
+
+            tx_count = fetch_token_tx_count(conn, token_name, exclude_issue=True)
+            rows = fetch_token_transactions(
+                conn,
+                token_name,
+                limit=20,
+                before_block=before_block,
+                before_ts=before_ts,
+                before_txid=before_txid,
+                exclude_issue=True,
+            )
+    except:
+        rows = []
+
+    if rows is None:
+        rows = []
+    has_next = len(rows) > 20
+    rows = rows[:20]
+    tx_view = []
+    for height, ts, addr_from, addr_to, amount, txid in rows:
+        tx_view.append({
+            "block": height,
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "from": addr_from,
+            "to": addr_to,
+            "amount": float(amount),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56])
+        })
+    tx_html = render_token_transactions_list(tx_view, token_name)
+
+    if has_next and rows:
+        last_block, last_ts, _, _, _, last_txid = rows[-1]
+        next_cursor = f"{last_block}|{last_ts}|{last_txid}"
+
+    return render_template(
+        'tokenquery.html',
+        token_name=token_name,
+        details=details,
+        tx_html=tx_html,
+        tx_count=tx_count,
+        has_next=has_next,
+        next_cursor=next_cursor,
+        has_before=bool(before),
+        error=None if details else "Token not found."
+    )
+
+
 @app.route('/tokenquery')
 def tokenquery():
-
     try:
         this_token = request.args.get('token')
     except:
         this_token = None
-        
-    if this_token:
+    token_name = (this_token or "").strip()
+    if token_name:
+        return redirect(f"/token/{token_name}")
+    return tokenquery_impl(token_name)
 
-        query_list = toolsp.query_token(this_token)
-        
-    else:
-        
-        query_list = []
-        
-    #print(query_list)
-    
-    tview = []
-        
-    for t in query_list:
 
-        token_address_from = t[3] #short token address from / bitsignal 2022-01-07
-        token_address_from_d = "{}....{}".format(token_address_from[:5],token_address_from[-5:]) #short token address from / bitsignal 2022-01-07
-        token_address_to = t[4] #short token address to / bitsignal 2022-01-07
-        token_address_to_d = "{}....{}".format(token_address_to[:5],token_address_to[-5:]) #short token address to / bitsignal 2022-01-07
-
-        token_txid = t[5] #short token txid 2022-01-07
-        token_txid_d = "{}....{}".format(token_txid[:5],token_txid[-5:]) #short token txid 2022-01-07
-
-        tview.append('<tr>')
-
-        tview.append("<td><b><a href='search?quicksearch={}'>{}</a><b></td>".format(str(t[0]),str(t[0])))
-        tview.append('<td>{}</td>'.format(str(time.strftime("%d/%m/%Y at %H:%M:%S", time.gmtime(float(t[1]))))))
-        if str(t[3]) == "issued":
-            tview.append("<td>{}</td>".format(str(t[3])))
-        else:
-            #tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(t[3]),str(t[3])))
-            tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(token_address_from),str(token_address_from_d))) #short token address from / bitsignal 2022-01-07
-        #tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(t[4]),str(t[4])))
-        tview.append("<td><a href='tokentxquery?address={}'>{}</a></td>".format(str(token_address_to),str(token_address_to_d))) #short token address to / bitsignal 2022-01-07
-        tview.append('<td>{}</td>'.format(str(t[6])))
-        #tview.append('<td>{}</td>'.format(str(t[5])))
-        tview.append("<td><span data-toggle='tooltip' title='{0} : Left Click to Copy' onclick='copyToClipboard(&quot;{0}&quot;)'>{1}</span></td>".format(str(token_txid),str(token_txid_d))) #added short token txid 2022-01-07
-        tview.append('</tr>\n')
-        
-    tplot = []
-    
-    tplot.append('<center><h4>{} - List of Transactions</h4></center>'.format(this_token))
-    tplot.append('<table style="font-size: 80%" class="table table-striped table-sm">\n')
-    tplot.append('<tr><thead>\n')
-    tplot.append('<th scope="col">Block</th>\n')
-    tplot.append('<th scope="col">Date</th>\n')
-    tplot.append('<th scope="col">From</th>\n')
-    tplot.append('<th scope="col">To</th>\n')
-    tplot.append('<th scope="col">Amount</th>\n')
-    tplot.append('<th scope="col">TXID</th>\n')
-    tplot.append('</thead></tr>\n')
-    tplot = tplot + tview
-    tplot.append('</table>\n')
-        
-    starter = "" + str(''.join(tplot))
-    
-    return render_template('tokenquery.html', starter=starter)
+@app.route('/token/<tokenname>')
+def token_view(tokenname):
+    token_name = (tokenname or "").strip()
+    return tokenquery_impl(token_name)
 
 
 @app.route('/tokentxquery')
@@ -1293,7 +2151,7 @@ def tokentxquery():
         tview.append('<tr>')
 
         tview.append("<td><b><a href='tokenquery?token={}'>{}</a><b></td>".format(str(t[2]),str(t[2])))
-        tview.append("<td><a href='search?quicksearch={}'>{}</a></td>".format(str(t[0]),str(t[0])))
+        tview.append("<td><a href='/block/{}'>{}</a></td>".format(str(t[0]),str(t[0])))
         tview.append('<td>{}</td>'.format(str(time.strftime("%d/%m/%Y at %H:%M:%S", time.gmtime(float(t[1]))))))
         if str(t[3]) == "issued":
             tview.append("<td>{}</td>".format(str(t[3])))
@@ -1328,27 +2186,41 @@ def tokentxquery():
 @app.route('/search', methods=['GET'])
 def search_result():
     block = (request.args.get('quicksearch') or "").strip()
+    block = toolsp.normalize_txid_input(block)
     block_type = toolsp.test(block)
     extext = ""
     starter = ""
     all_rows = []
+    address_view = False
+    address_payload = {}
 
     with sqlite3.connect(bis_root) as conn:
         if block_type == 1:
+            is_address = toolsp.s_test(block)
+            if not is_address and len(block) == 56:
+                txref = toolsp.txid_to_base58(block)
+                return redirect(f"/tx/{txref}")
+            if is_address:
+                return redirect(f"/address/{block}")
             data = fetch_address_data(block)
             if float(data[0]) or float(data[2]) > 0:
                 generate_qr_code(block)
                 alias = get_alias_display(data[8])
-                extext = build_info_html(block, alias, data)
-                temp_all = fetch_transactions(conn, block)
-                if mydisplay == 0 or block == topia:
-                    all_rows = temp_all
-                else:
-                    all_rows = temp_all[:mydisplay]
+                address_view = True
+                address_payload = {
+                    "address": block,
+                    "alias": alias,
+                    "balance": data[4],
+                    "total_received": data[0],
+                    "total_spent": data[1],
+                    "rewards": data[2],
+                    "fees": data[3],
+                    "qr_path": f"static/qr_{block}.png"
+                }
             else:
-                all_rows = fetch_block_transactions(conn, block)
+                all_rows = timed_call("fetch_block_transactions", fetch_block_transactions, conn, block)
                 if not all_rows:
-                    all_rows = [toolsp.get_the_details(block, "")]
+                    all_rows = [timed_call("toolsp.get_the_details", toolsp.get_the_details, block, "")]
                 if not all_rows[0]:
                     extext = "<center><p style='color:#C70039'>Nothing found for the block, address, txid or hash you entered - perhaps no transactions have been made?</p></center>"
                 else:
@@ -1358,7 +2230,7 @@ def search_result():
             if block == "0":
                 all_rows = []
             else:
-                all_rows = fetch_by_height(conn, block)
+                return redirect(f"/block/{block}")
             if not all_rows:
                 extext = "<center><p style='color:#C70039'>Block, address, txid or hash not found...</p></center>"
             else:
@@ -1367,10 +2239,208 @@ def search_result():
         elif block_type == 3:
             extext = "<center><p style='color:#C70039'>Block, address, txid or hash not found...</p></center>"
 
+    if address_view:
+        return redirect(f"/address/{block}")
+
     if all_rows and all_rows[0]:
         starter = render_transaction_table(all_rows, mydisplay)
 
     return render_template('search.html', starter=starter, extext=extext)
+
+
+@app.route('/block/<height>', methods=['GET'])
+def block_view(height):
+    height = (height or "").strip()
+    if not height or not height.isdigit():
+        return render_template(
+            'block.html',
+            block_height=height,
+            error="Invalid block height.",
+            tx_html="",
+            details=None,
+            has_next=False,
+            next_cursor="",
+            has_before=False,
+            tx_count=0
+        )
+
+    details = None
+    tx_rows = []
+    tx_count = 0
+    before = request.args.get('before', '').strip()
+    before_ts = None
+    before_sig = None
+    if before and "|" in before:
+        parts = before.split("|", 1)
+        try:
+            before_ts = float(parts[0])
+            before_sig = parts[1]
+        except:
+            before_ts = None
+            before_sig = None
+
+    with sqlite3.connect(bis_root) as conn:
+        tx_count = fetch_block_tx_count(conn, height)
+        if tx_count:
+            reward_row = fetch_block_reward_summary(conn, height)
+            if reward_row:
+                details = {
+                    "height": reward_row[0],
+                    "timestamp": time.strftime("%H:%M:%S, %d/%m/%Y", time.gmtime(float(reward_row[1]))),
+                    "miner": reward_row[2] or reward_row[3],
+                    "reward": float(reward_row[4]),
+                    "txid": reward_row[5][:56],
+                    "txref": toolsp.txid_to_base58(reward_row[5][:56]),
+                    "block_hash": reward_row[6],
+                    "fee": reward_row[7],
+                    "operation": reward_row[8],
+                    "openfield": reward_row[9],
+                    "tx_count": tx_count
+                }
+            else:
+                first_row = fetch_block_first_row(conn, height)
+                if first_row:
+                    details = {
+                        "height": height,
+                        "timestamp": time.strftime("%H:%M:%S, %d/%m/%Y", time.gmtime(float(first_row[1]))),
+                        "miner": "",
+                        "reward": 0.0,
+                        "txid": "",
+                        "txref": "",
+                        "block_hash": first_row[6] or "",
+                        "fee": "",
+                        "operation": "",
+                        "openfield": "",
+                        "tx_count": tx_count
+                    }
+
+        tx_rows = fetch_block_transactions_paginated(conn, height, limit=20, before_ts=before_ts, before_sig=before_sig)
+
+    if not tx_count:
+        return render_template(
+            'block.html',
+            block_height=height,
+            error="Block not found.",
+            tx_html="",
+            details=None,
+            has_next=False,
+            next_cursor="",
+            has_before=False,
+            tx_count=0
+        )
+
+    tx_view = []
+    has_next = len(tx_rows) > 20
+    tx_rows = tx_rows[:20]
+    for row in tx_rows:
+        tx_view.append({
+            "block": row[0],
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(row[1]))),
+            "from": row[2],
+            "to": row[3],
+            "amount": float(row[4]),
+            "txid": row[5][:56],
+            "txid_url": toolsp.txid_to_base58(row[5][:56])
+        })
+
+    tx_html, _ = render_demo_home_lists(tx_view, [], show_miner_label=False)
+    next_cursor = ""
+    if has_next and tx_rows:
+        _, last_ts, _, _, _, last_sig = tx_rows[-1]
+        next_cursor = f"{last_ts}|{last_sig}"
+
+    return render_template(
+        'block.html',
+        block_height=height,
+        error="",
+        tx_html=tx_html,
+        details=details,
+        has_next=has_next,
+        next_cursor=next_cursor,
+        has_before=bool(before),
+        tx_count=tx_count
+    )
+
+
+@app.route('/address/<address>', methods=['GET'])
+def address_view(address):
+    from urllib.parse import quote
+    address = (address or "").strip()
+    if not address:
+        return render_template('search.html', starter="", extext="")
+
+    data = timed_call("fetch_address_data", fetch_address_data, address)
+    if not (float(data[0]) or float(data[2]) > 0):
+        return redirect(f"/search?quicksearch={address}")
+
+    timed_call("generate_qr_code", generate_qr_code, address)
+    alias = get_alias_display(data[8])
+    address_payload = {
+        "address": address,
+        "alias": alias,
+        "balance": data[4],
+        "total_received": data[0],
+        "total_spent": data[1],
+        "rewards": data[2],
+        "fees": data[3],
+        "qr_path": f"static/qr_{address}.png"
+    }
+
+    limit = 20
+    before = request.args.get('before', '').strip()
+    if before:
+        before = before.replace(" ", "+")
+    before_ts = None
+    before_sig = None
+    if before and "|" in before:
+        parts = before.split("|", 1)
+        try:
+            before_ts = float(parts[0])
+            before_sig = parts[1]
+        except:
+            before_ts = None
+            before_sig = None
+
+    with sqlite3.connect(bis_root) as conn:
+        rows = timed_call(
+            "fetch_address_transactions",
+            fetch_address_transactions,
+            conn,
+            address,
+            limit=limit,
+            before_ts=before_ts,
+            before_sig=before_sig,
+        )
+
+    has_next = len(rows) > limit
+    rows = rows[:limit]
+    tx_view = []
+    for height, ts, addr_from, addr_to, amount, txid in rows:
+        tx_view.append({
+            "block": height,
+            "timestamp": time.strftime("%b %d %Y %H:%M:%S", time.gmtime(float(ts))),
+            "from": addr_from,
+            "to": addr_to,
+            "amount": float(amount),
+            "txid": txid[:56],
+            "txid_url": toolsp.txid_to_base58(txid[:56])
+        })
+    tx_html = render_address_transactions_list(tx_view, address)
+    next_cursor = ""
+    next_cursor_q = ""
+    if has_next and rows:
+        _, last_ts, _, _, _, last_sig = rows[-1]
+        next_cursor = f"{last_ts}|{last_sig}"
+        next_cursor_q = quote(next_cursor, safe="")
+
+    return render_template(
+        'address.html',
+        tx_html=tx_html,
+        has_next=has_next,
+        next_cursor=next_cursor_q,
+        has_before=bool(before),
+        **address_payload
+    )
 
     
 @app.route('/api/<param1>/<param2>', methods=['GET'])
@@ -1669,6 +2739,7 @@ def handler(param1, param2):
                 
     elif param1 == "txid":
             gettxid = str(param2)
+            gettxid = toolsp.normalize_txid_input(gettxid)
             
             get_txid = gettxid.replace(".","/")
         
@@ -1702,7 +2773,7 @@ def handler(param1, param2):
             gettxid = str(param2)
         
             tx_add_info = gettxid.split(":")
-            get_txid = tx_add_info[0]
+            get_txid = toolsp.normalize_txid_input(tx_add_info[0])
             get_add_from = tx_add_info[1]
                         
             get_txid = get_txid.replace(".","/")

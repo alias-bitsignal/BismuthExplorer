@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.demo-home {
+  margin-top: 20px;
+  margin-bottom: 40px;
+}
+.demo-panel {
+  background: #202634;
+  border: 1px solid #2b3246;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.demo-title {
+  font-size: 20px;
+  letter-spacing: 0.5px;
+}
+.demo-viewall {
+  color: #2f6feb;
+  text-decoration: none;
+  font-size: 14px;
+}
+.demo-viewall:hover {
+  text-decoration: underline;
+}
+.demo-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.demo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 6px;
+  border-top: 1px solid #2b3246;
+}
+.demo-item:first-child {
+  border-top: 0;
+}
+.demo-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.demo-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: #2b3246;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d7d6d7;
+  font-weight: bold;
+}
+.demo-primary {
+  color: #6fe1d2;
+  font-family: monospace;
+}
+.demo-txid-label {
+  color: #d7d6d7;
+}
+.demo-miner-label {
+  color: #d7d6d7;
+}
+.demo-secondary {
+  color: #d7d6d7;
+  font-size: 13px;
+  margin-top: 4px;
+}
+.demo-meta {
+  text-align: right;
+  font-size: 13px;
+  color: #d7d6d7;
+  min-width: 140px;
+}
+.demo-meta-strong {
+  font-weight: 600;
+  color: #ffffff;
+}
+@media (max-width: 991px) {
+  .demo-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .demo-meta {
+    text-align: left;
+  }
+}
+</style>
+</head>
+{% include 'nav.html' %}
+
+<div class="container-fluid demo-home">
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="demo-panel">
+        <div class="demo-header">
+          <div class="demo-title">Transactions</div>
+          <a class="demo-viewall" href="/transactions">View All</a>
+        </div>
+        <ul id="demo-tx-list" class="demo-list">{{ tx_html|safe }}</ul>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="demo-panel">
+        <div class="demo-header">
+          <div class="demo-title">Blocks</div>
+          <a class="demo-viewall" href="/blocks">View All</a>
+        </div>
+        <ul id="demo-block-list" class="demo-list">{{ block_html|safe }}</ul>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  (function() {
+    function refreshDemo() {
+      fetch('/home_data')
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data && data.tx_html && data.block_html) {
+            document.getElementById('demo-tx-list').innerHTML = data.tx_html;
+            document.getElementById('demo-block-list').innerHTML = data.block_html;
+          }
+        })
+        .catch(function() {});
+    }
+    setInterval(refreshDemo, 5000);
+  })();
+</script>
+{% endblock %}

@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 
 {% block content %}
+
 </head>
 {% include 'nav.html' %}
 	<div class="container">
 		<center><p></p>
-		<h3>Bismuth Rich List</h3>
-		<p style="font-size: 85%"><b>List of all Bismuth addresses with more than {{ bislim|safe }} BIS</b></p>
+		<h3>Top Addresses by BIS Balance</h3>
+		<p style="font-size: 85%"><b>List of all Bismuth addresses with more than {{ bislim|safe }} BIS - {{ total_addresses }} Addresses</b></p>
 		<p style="font-size: 75%">Note: this page may be up to 45 mins behind</p>
 		<p></p>
 		</center>
@@ -27,8 +28,9 @@
 		</div>
 	</div>
 	<p></p>
-	<div  class="container">
-	<table style="font-size: 80%" class="table table-striped table-sm">
+	<div class="container">
+	<div class="table-responsive">
+	<table style="font-size: 80%" class="table table-striped table-sm richlist">
 	<thead>
 		<tr>
 		<th scope="col" bgcolor="#D0F7C3">Rank</th>
@@ -39,6 +41,20 @@
 		</tr>
 	</thead>
 	{{ richest|safe }}
+	
 	</table>
+	</div>
+	<div class="d-flex justify-content-between mt-2">
+		<div>
+			{% if has_before %}
+			<a href="/richest">Latest</a>
+			{% endif %}
+		</div>
+		<div>
+			{% if has_next %}
+			<a href="/richest?before={{ next_cursor }}">Next</a>
+			{% endif %}
+		</div>
+	</div>
 	</div>
 {% endblock %}

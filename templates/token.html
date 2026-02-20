@@ -233,12 +233,12 @@
     <div class="demo-pagination">
       <div>
         {% if has_before %}
-          <a href="/token/{{ token_name }}">Latest</a>
+          <a href="/tokenquery?token={{ token_name }}">Latest</a>
         {% endif %}
       </div>
       <div>
         {% if has_next %}
-          <a href="/token/{{ token_name }}?before={{ next_cursor }}">Next</a>
+          <a href="/tokenquery?token={{ token_name }}&before={{ next_cursor }}">Next</a>
         {% endif %}
       </div>
     </div>

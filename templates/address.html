@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.address-page {
+  padding: 16px 0 40px;
+}
+.address-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.address-title {
+  font-size: 22px;
+  font-weight: 600;
+}
+.address-subtitle {
+  color: #d7d6d7;
+  font-size: 13px;
+  margin-top: 4px;
+  word-break: break-word;
+  font-family: monospace;
+}
+.address-actions .btn {
+  border-color: #d7d6d7;
+  color: #f2f2f2;
+}
+.address-actions .btn:hover {
+  color: #202634;
+  background: #d7d6d7;
+}
+.address-panel {
+  background: #202634;
+  border: 1px solid #2b3246;
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.address-info {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 16px;
+  align-items: start;
+}
+.address-info-list {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  row-gap: 8px;
+  column-gap: 16px;
+}
+.address-info-divider {
+  grid-column: 1 / -1;
+  border-top: 1px solid #2b3246;
+  margin: 6px 0;
+}
+.address-label {
+  color: #d7d6d7;
+  font-weight: 600;
+}
+.address-value {
+  color: #ffffff;
+  word-break: break-word;
+  font-family: monospace;
+}
+.address-value-normal {
+  font-family: inherit;
+}
+.address-qr {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.address-qr img {
+  max-width: 160px;
+  height: auto;
+}
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.demo-title {
+  font-size: 20px;
+  letter-spacing: 0.5px;
+}
+.demo-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.demo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 6px;
+  border-top: 1px solid #2b3246;
+}
+.demo-item:first-child {
+  border-top: 0;
+}
+.demo-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.demo-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: #2b3246;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d7d6d7;
+  font-weight: bold;
+}
+.demo-positive {
+  color: #2C8529;
+}
+.demo-negative {
+  color: #C33C3C;
+}
+.demo-amount-unit {
+  color: #d7d6d7;
+}
+.demo-primary {
+  color: #6fe1d2;
+  font-family: monospace;
+}
+.demo-txid-label {
+  color: #d7d6d7;
+}
+.demo-secondary {
+  color: #d7d6d7;
+  font-size: 13px;
+  margin-top: 4px;
+}
+.demo-meta {
+  text-align: right;
+  font-size: 13px;
+  color: #d7d6d7;
+  min-width: 140px;
+}
+.demo-meta-strong {
+  font-weight: 600;
+  color: #ffffff;
+}
+.demo-pagination {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+.demo-pagination a {
+  color: #2f6feb;
+  text-decoration: none;
+}
+.demo-pagination a:hover {
+  text-decoration: underline;
+}
+@media (max-width: 991px) {
+  .address-info {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .address-info-list {
+    grid-template-columns: 140px minmax(0, 1fr);
+  }
+  .address-qr {
+    justify-content: flex-start;
+  }
+  .demo-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .demo-meta {
+    text-align: left;
+  }
+  .demo-pagination {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>
+</head>
+{% include 'nav.html' %}
+
+<div class="container-fluid address-page">
+  <div class="address-header">
+    <div>
+      <div class="address-title">Address</div>
+      <div class="address-subtitle">{{ address }}</div>
+    </div>
+    <div class="address-actions">
+      <button class="btn btn-sm btn-outline-light" onclick="copyToClipboard('{{ address }}')">Copy</button>
+    </div>
+  </div>
+
+  <div class="address-panel">
+    <div class="address-info">
+      <div class="address-info-list">
+        <div class="address-label">Address</div>
+        <div class="address-value">{{ address }}</div>
+
+        <div class="address-label">Alias</div>
+        <div class="address-value address-value-normal">{{ alias }}</div>
+
+        <div class="address-label">Balance</div>
+        <div class="address-value address-value-normal">{{ balance }} BIS</div>
+
+        <div class="address-info-divider"></div>
+
+        <div class="address-label">Fees</div>
+        <div class="address-value address-value-normal">{{ fees }}</div>
+
+        <div class="address-label">Total Received</div>
+        <div class="address-value address-value-normal">{{ total_received }}</div>
+
+        <div class="address-label">Total Spent</div>
+        <div class="address-value address-value-normal">{{ total_spent }}</div>
+
+        <div class="address-label">Rewards</div>
+        <div class="address-value address-value-normal">{{ rewards }}</div>
+      </div>
+      <div class="address-qr">
+        <img src="/{{ qr_path }}" alt="{{ address }}">
+      </div>
+    </div>
+  </div>
+
+  <div class="address-panel">
+    <div class="demo-header">
+      <div class="demo-title">Transactions</div>
+    </div>
+    <ul class="demo-list">{{ tx_html|safe }}</ul>
+    <div class="demo-pagination">
+      <div>
+        {% if has_before %}
+          <a href="/address/{{ address }}">Latest</a>
+        {% endif %}
+      </div>
+      <div>
+        {% if has_next %}
+          <a href="/address/{{ address }}?before={{ next_cursor }}">Next</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
